@@ -17,6 +17,7 @@ class Entry(Base):
     id = Column(Integer, primary_key=True)
     path = Column(String, nullable=False)
     date = Column(DateTime, default=datetime.utcnow)
+    camera_model = Column(String, nullable=True)
     scene_type = Column(String, nullable=True)
 
     detections = relationship("FaceDetection", cascade="all, delete-orphan")

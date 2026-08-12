@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -5,12 +7,17 @@ from app.database.database_dependencies import Entry, FaceDetection, Identity
 
 Base = declarative_base()
 
-class BDManager:
-    def __init__(self, db_path=None):
+class DBManager:
+    def __init__(self, db_path: Path | None = None):
         self.db_path = db_path
         self.engine = None
         self.Session = None
         self.session = None
+
+        if self.db_path and self.db_path.exists():
+            self.load_database()
+        else:
+            self.create_database()
 
     # --------------------------------------------------------
     # CREAR BASE DE DATOS
@@ -38,11 +45,11 @@ class BDManager:
     # --------------------------------------------------------
     # AÑADIR ENTRADA (IMAGEN)
     # --------------------------------------------------------
-    def add_entry(self, path, date, scene_type):
+    def add_entry(self, path, date, camera_model, scene_type):
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
-        entry = Entry(path=path, date=date, scene_type=scene_type)
+        entry = Entry(path=path, date=date, camera_model=camera_model, scene_type=scene_type)
         self.session.add(entry)
         self.session.commit()
         return entry.id
@@ -50,7 +57,7 @@ class BDManager:
     # --------------------------------------------------------
     # AÑADIR DETECCIONES FACIALES
     # --------------------------------------------------------
-    def add_face_detections(self, entry_id, embeddings_list, confidence=None):
+    def add_face_detections(self, entry_id, embeddings_list, confidences):
         """
         embeddings_list: lista de vectores de embedding
                         ej: [[v1, v2, ...], [v1, v2, ...], ...]
@@ -71,7 +78,7 @@ class BDManager:
                 entry_id=entry_id,
                 index=base_index + i,
                 embedding=embedding,
-                confidence=confidence
+                confidence=confidences[i]
             )
 
             self.session.add(det)
