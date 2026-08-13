@@ -45,6 +45,9 @@ class FaceDetection(Base):
     # Embedding almacenado JSON
     embedding = Column(JSON)
 
+    # Bounding box opcional almacenada como JSON: {"x1":.., "y1":.., "x2":.., "y2":..}
+    bbox = Column(JSON)
+
     # Confianza opcional
     confidence = Column(Float, nullable=True)
 

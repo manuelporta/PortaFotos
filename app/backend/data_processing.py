@@ -1,7 +1,15 @@
 import subprocess
 import json
+import numpy as np
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
+
+import insightface
+import torch
+import clip
+from PIL import Image
+from ultralytics import YOLO
 
 from app.database.database_manager import DBManager
 
@@ -17,15 +25,38 @@ DATE_FIELDS = [
 ]
 CAMERA_FIELDS = ["Model", "CameraModelName", "Make"]
 
+CLIP_SCENES = [
+    "selfie", "group photo", "landscape", "concert",
+    "drawing", "meme", "food", "pet", "sports event"
+]
+
 
 class GalleryManager:
 
     def __init__(self, root_path, db_path):
+        # Init database
         self.root_path = Path(root_path)
         self.db_path = Path(db_path)
         self.db = DBManager(db_path=self.db_path)
 
         self.files = None
+
+        # Init models (maybe do it in functions if too slow?)
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Scene classification
+        self.preprocess: Callable[[Image.Image], torch.Tensor]
+        self.scene_features: torch.Tensor
+
+        self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
+        scene_tokens = clip.tokenize(CLIP_SCENES).to(self.device)
+        self.scene_features = self.model.encode_text(scene_tokens)
+        self.scene_features /= self.scene_features.norm(dim=-1, keepdim=True)
+
+        # Face detection and recognition
+        self.face_detector = YOLO("models/yolov8n-face.pt")
+        self.arcface = insightface.app.FaceAnalysis(name="buffalo_l")
+        self.arcface.prepare(ctx_id=0, det_size=(640, 640))
 
     def read_images(self):
         files = [file for file in self.root_path.rglob("*")]
@@ -42,14 +73,15 @@ class GalleryManager:
         for file in self.files:
             print(f"Adding image: {file}")
             date, camera_model = self.extract_metadata(file)
-            scene_type = "Unknown"  # Placeholder, can be updated later
-            entry_id = self.db.add_entry(str(file), date, camera_model, scene_type)
+            img = Image.open(file)
+            scene_type = self.infer_scene(img)
+            entry_id = self.db.add_entry(str(file.relative_to(self.root_path)), date, camera_model, scene_type)
             print(f"Entry added with ID: {entry_id}")
 
             # Detectar rostros y extraer embeddings
-            face_embeddings, confidences = self.detect_faces(file)
+            bboxes, face_embeddings, confidences = self.detect_faces(img)
 
-            self.db.add_face_detections(entry_id, embeddings_list=face_embeddings, confidences=[])
+            self.db.add_face_detections(entry_id, embeddings_list=face_embeddings, bboxes=bboxes, confidences=confidences)
 
 
     def extract_metadata(self, path):
@@ -98,14 +130,121 @@ class GalleryManager:
 
         return oldest_date, camera_model
 
+    def infer_scene(self, img: Image.Image):
+        """
+        Infer scene label using CLIP
+        """
+        img_tensor = self.preprocess(img)
+        img_tensor  = img_tensor.unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            image_features = self.model.encode_image(img_tensor)
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+        
+            # Compute similarity
+            similarity = (image_features @ self.scene_features.T).squeeze(0)
+
+        # Resultado
+        best_idx = similarity.argmax().item()
+        # TODO añadir umbral
+        print(f"Selected scene: {CLIP_SCENES[best_idx]}")
+        return CLIP_SCENES[best_idx]
     
-    def detect_faces(self, file: Path):
-        embeddings, confidences = [], []
+    def detect_faces(self, img: Image.Image):
+        bboxes, embeddings, confidences = [], [], []
 
-        # TODO
+        np_img = np.array(img)
 
-        return embeddings, confidences
+        detections = self.face_detector.predict(img, verbose=False)
+        if not detections:
+            return bboxes, embeddings, confidences
+        
+        detections = list(detections)[0]
 
-    def extract_embeddings(self):
-        # Extraer embeddings de los rostros detectados
-        pass
+        det_boxes = getattr(detections, "boxes", None)
+
+        if det_boxes is None:
+            print("No 'boxes' in detections. REVIEW")
+            return bboxes, embeddings, confidences
+
+        for box in det_boxes:
+            if box.conf < 0.6:
+                continue
+            # Bounding box
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            
+            # Crop face
+            face_crop = np_img[int(y1):int(y2), int(x1):int(x2)]
+            if face_crop.size == 0:
+                continue
+    
+            # Arcface embedding
+            face_crop_bgr = face_crop[:, :, ::-1]
+            faces = self.arcface.get(face_crop_bgr)
+            if len(faces) == 0:
+                continue
+            face = faces[0]
+    
+            embeddings.append(face.embedding.tolist())
+            bboxes.append((x1, y1, x2, y2))
+            confidences.append(box.conf)
+
+
+        return bboxes, embeddings, confidences
+
+
+
+
+
+
+
+# -----------------------------
+# Función principal
+# -----------------------------
+def detect_faces_and_embeddings(pil_image):
+    """
+    Detecta caras con YOLOv8-face y extrae embeddings con ArcFace.
+    Devuelve una lista de dicts con bbox, landmarks y embedding.
+    """
+
+    # Convertir PIL → numpy (RGB)
+    img = np.array(pil_image)
+
+    # -----------------------------
+    # 1. Detección de caras
+    # -----------------------------
+    results = face_detector.predict(img, verbose=False)[0]
+
+    detections = []
+
+    for box in results.boxes:
+        # Bounding box
+        x1, y1, x2, y2 = box.xyxy[0].tolist()
+
+        # Recortar la cara
+        face_crop = img[int(y1):int(y2), int(x1):int(x2)]
+
+        if face_crop.size == 0:
+            continue
+
+        # -----------------------------
+        # 2. Embedding con ArcFace
+        # -----------------------------
+        # ArcFace espera BGR
+        face_crop_bgr = face_crop[:, :, ::-1]
+
+        faces = arcface.get(face_crop_bgr)
+
+        if len(faces) == 0:
+            continue
+
+        # Tomamos la cara principal del crop
+        face = faces[0]
+
+        detections.append({
+            "bbox": (x1, y1, x2, y2),
+            "landmarks": face.landmark_2d_106.tolist() if hasattr(face, "landmark_2d_106") else None,
+            "embedding": face.embedding.tolist()
+        })
+
+    return 

@@ -57,7 +57,7 @@ class DBManager:
     # --------------------------------------------------------
     # AÑADIR DETECCIONES FACIALES
     # --------------------------------------------------------
-    def add_face_detections(self, entry_id, embeddings_list, confidences):
+    def add_face_detections(self, entry_id, embeddings_list, bboxes, confidences):
         """
         embeddings_list: lista de vectores de embedding
                         ej: [[v1, v2, ...], [v1, v2, ...], ...]
@@ -78,6 +78,7 @@ class DBManager:
                 entry_id=entry_id,
                 index=base_index + i,
                 embedding=embedding,
+                bbox = bboxes[i],
                 confidence=confidences[i]
             )
 
