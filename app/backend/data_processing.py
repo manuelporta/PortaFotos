@@ -9,7 +9,6 @@ import insightface
 import torch
 import clip
 from PIL import Image
-from ultralytics import YOLO
 
 from app.database.database_manager import DBManager
 
@@ -54,7 +53,6 @@ class GalleryManager:
         self.scene_features /= self.scene_features.norm(dim=-1, keepdim=True)
 
         # Face detection and recognition
-        self.face_detector = YOLO("models/yolov8n-face.pt")
         self.arcface = insightface.app.FaceAnalysis(name="buffalo_l")
         self.arcface.prepare(ctx_id=0, det_size=(640, 640))
 
@@ -153,98 +151,19 @@ class GalleryManager:
     def detect_faces(self, img: Image.Image):
         bboxes, embeddings, confidences = [], [], []
 
-        np_img = np.array(img)
+        np_img_bgr = np.array(img)[:, :, ::-1]
 
-        detections = self.face_detector.predict(img, verbose=False)
-        if not detections:
-            return bboxes, embeddings, confidences
-        
-        detections = list(detections)[0]
+        faces = self.arcface.get(np_img_bgr)
 
-        det_boxes = getattr(detections, "boxes", None)
-
-        if det_boxes is None:
-            print("No 'boxes' in detections. REVIEW")
-            return bboxes, embeddings, confidences
-
-        for box in det_boxes:
-            if box.conf < 0.6:
+        for face in faces:
+            if face.det_score < 0.7:
                 continue
-            # Bounding box
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            
-            # Crop face
-            face_crop = np_img[int(y1):int(y2), int(x1):int(x2)]
-            if face_crop.size == 0:
-                continue
-    
-            # Arcface embedding
-            face_crop_bgr = face_crop[:, :, ::-1]
-            faces = self.arcface.get(face_crop_bgr)
-            if len(faces) == 0:
-                continue
-            face = faces[0]
+
+            # x1, y1, x2, y2 = face.bbox
     
             embeddings.append(face.embedding.tolist())
-            bboxes.append((x1, y1, x2, y2))
-            confidences.append(box.conf)
+            bboxes.append(face.bbox)
+            confidences.append(face.det_score)
 
 
         return bboxes, embeddings, confidences
-
-
-
-
-
-
-
-# -----------------------------
-# Función principal
-# -----------------------------
-def detect_faces_and_embeddings(pil_image):
-    """
-    Detecta caras con YOLOv8-face y extrae embeddings con ArcFace.
-    Devuelve una lista de dicts con bbox, landmarks y embedding.
-    """
-
-    # Convertir PIL → numpy (RGB)
-    img = np.array(pil_image)
-
-    # -----------------------------
-    # 1. Detección de caras
-    # -----------------------------
-    results = face_detector.predict(img, verbose=False)[0]
-
-    detections = []
-
-    for box in results.boxes:
-        # Bounding box
-        x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-        # Recortar la cara
-        face_crop = img[int(y1):int(y2), int(x1):int(x2)]
-
-        if face_crop.size == 0:
-            continue
-
-        # -----------------------------
-        # 2. Embedding con ArcFace
-        # -----------------------------
-        # ArcFace espera BGR
-        face_crop_bgr = face_crop[:, :, ::-1]
-
-        faces = arcface.get(face_crop_bgr)
-
-        if len(faces) == 0:
-            continue
-
-        # Tomamos la cara principal del crop
-        face = faces[0]
-
-        detections.append({
-            "bbox": (x1, y1, x2, y2),
-            "landmarks": face.landmark_2d_106.tolist() if hasattr(face, "landmark_2d_106") else None,
-            "embedding": face.embedding.tolist()
-        })
-
-    return 
