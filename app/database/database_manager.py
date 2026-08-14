@@ -1,11 +1,9 @@
 from pathlib import Path
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
-from app.database.database_dependencies import Entry, FaceDetection, Identity
-
-Base = declarative_base()
+from app.database.database_dependencies import Base, Entry, FaceDetection, Identity
 
 class DBManager:
     def __init__(self, db_path: Path | None = None):

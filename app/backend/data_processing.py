@@ -1,7 +1,7 @@
 import subprocess
 import json
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -12,7 +12,7 @@ from PIL import Image
 
 from app.database.database_manager import DBManager
 
-IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".gif"}
+IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
 DATE_FIELDS = [
     "DateTimeOriginal",
     "CreateDate",
@@ -56,12 +56,16 @@ class GalleryManager:
         self.arcface = insightface.app.FaceAnalysis(name="buffalo_l")
         self.arcface.prepare(ctx_id=0, det_size=(640, 640))
 
+    def create(self):
+        self.read_images()
+        self.process_images()
+
     def read_images(self):
         files = [file for file in self.root_path.rglob("*")]
         files_extensions = set([file.suffix.lower() for file in files])
         if unknown_extensions:=files_extensions - IMG_EXTENSIONS:
-            raise ValueError(f"Unkown extensions found: {unknown_extensions}")
-        
+            print(f"Unknown extensions found: {unknown_extensions}")
+
         self.files = [file for file in files if file.suffix.lower() in IMG_EXTENSIONS]
 
     def process_images(self):
@@ -81,7 +85,6 @@ class GalleryManager:
 
             self.db.add_face_detections(entry_id, embeddings_list=face_embeddings, bboxes=bboxes, confidences=confidences)
 
-
     def extract_metadata(self, path):
         """
         Obtain the oldest date and camera model from the image metadata using exiftool.
@@ -99,7 +102,10 @@ class GalleryManager:
         data = json.loads(result.stdout)[0]
 
         if not data or len(data) == 0:
-            return "Unknown", "Unknown"
+            camera_model = "Unknown"
+            oldest_date = self.get_file_date(path)
+            return camera_model, oldest_date
+            
 
         # Extaract older date
         dates = []
@@ -109,15 +115,20 @@ class GalleryManager:
                 try:
                     # Normalizar formato EXIF: YYYY:MM:DD HH:MM:SS
                     d = data[field].replace(":", "-", 2)
-                    dates.append(datetime.fromisoformat(d))
+                    dt = datetime.fromisoformat(d)
+                    # Normalize: convert all datetimes to timezone-aware UTC
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    else:
+                        dt = dt.astimezone(timezone.utc)
+                    dates.append(dt)
                 except Exception as e:
                     print(f"Error while parsing date from field {field} ({data[field]}): {e}")
 
         if dates:
             oldest_date = min(dates)
         else:
-            oldest_date = "Unknown"
-
+            oldest_date = self.get_file_date(path)
 
         # Extract camera model
         camera_model = "Unknown"
@@ -127,6 +138,22 @@ class GalleryManager:
                 break
 
         return oldest_date, camera_model
+
+    def get_file_date(self, path: Path) -> datetime:
+        try:
+            stat = path.stat()
+            dates = [
+                datetime.fromtimestamp(stat.st_ctime),
+                datetime.fromtimestamp(stat.st_mtime),
+                datetime.fromtimestamp(stat.st_atime),
+            ]
+        except Exception as e:
+            print(f"Exception parsing file dates: \n{e}")
+            return datetime.now()
+
+        else:
+            return min(dates)
+
 
     def infer_scene(self, img: Image.Image):
         """
@@ -138,7 +165,7 @@ class GalleryManager:
         with torch.no_grad():
             image_features = self.model.encode_image(img_tensor)
             image_features /= image_features.norm(dim=-1, keepdim=True)
-        
+
             # Compute similarity
             similarity = (image_features @ self.scene_features.T).squeeze(0)
 
@@ -147,7 +174,7 @@ class GalleryManager:
         # TODO añadir umbral
         print(f"Selected scene: {CLIP_SCENES[best_idx]}")
         return CLIP_SCENES[best_idx]
-    
+
     def detect_faces(self, img: Image.Image):
         bboxes, embeddings, confidences = [], [], []
 
@@ -160,10 +187,9 @@ class GalleryManager:
                 continue
 
             # x1, y1, x2, y2 = face.bbox
-    
-            embeddings.append(face.embedding.tolist())
-            bboxes.append(face.bbox)
-            confidences.append(face.det_score)
 
+            embeddings.append(face.embedding.tolist())
+            bboxes.append(face.bbox.tolist())
+            confidences.append(face.det_score)
 
         return bboxes, embeddings, confidences

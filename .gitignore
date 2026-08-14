@@ -1,3 +1,4 @@
 .vscode/**
 app/models
 *.ipynb
+**/__pycache__/**
