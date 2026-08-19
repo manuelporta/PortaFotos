@@ -8,7 +8,7 @@ from typing import Callable
 import insightface
 import torch
 import clip
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from app.database.database_manager import DBManager
 
@@ -24,10 +24,24 @@ DATE_FIELDS = [
 ]
 CAMERA_FIELDS = ["Model", "CameraModelName", "Make"]
 
-CLIP_SCENES = [
-    "selfie", "group photo", "landscape", "concert",
-    "drawing", "meme", "food", "pet", "sports event"
-]
+CLIP_SCENES = {
+    "close-up photo of a person":"portrait", 
+    "photo of one or more animals":"animals",
+    "photo of people playing sports":"sports",
+    "digital or hand-made drawing":"drawing",
+    "computer or smartphone screenshot":"screenshot",
+    "document with written text":"text",
+    "photo of one or more objects":"objects",
+    "selfie":"selfie",
+    "group photo":"group",
+    "photo of a landscape":"landscape",
+    "photo of an architectural work":"landscape",
+    "photo of a music show":"concert",
+    "food or drink photo":"food",
+    "funny meme image":"meme",
+    "photo of one or more vehicles":"cars",
+    "image without anything remarkable":"default"
+}
 
 
 class GalleryManager:
@@ -48,7 +62,8 @@ class GalleryManager:
         self.scene_features: torch.Tensor
 
         self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
-        scene_tokens = clip.tokenize(CLIP_SCENES).to(self.device)
+        self.clip_scenes = list(CLIP_SCENES.keys())
+        scene_tokens = clip.tokenize(self.clip_scenes).to(self.device)
         self.scene_features = self.model.encode_text(scene_tokens)
         self.scene_features /= self.scene_features.norm(dim=-1, keepdim=True)
 
@@ -74,10 +89,16 @@ class GalleryManager:
 
         for file in self.files:
             print(f"Adding image: {file}")
+            
+            try:
+                img = Image.open(file)
+            except UnidentifiedImageError as e:
+                print(f"Error reading image:\n{e}")
+                continue
+
             date, camera_model = self.extract_metadata(file)
-            img = Image.open(file)
             scene_type = self.infer_scene(img)
-            entry_id = self.db.add_entry(str(file.relative_to(self.root_path)), date, camera_model, scene_type)
+            entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, scene_type)
             print(f"Entry added with ID: {entry_id}")
 
             # Detectar rostros y extraer embeddings
@@ -172,8 +193,12 @@ class GalleryManager:
         # Resultado
         best_idx = similarity.argmax().item()
         # TODO añadir umbral
-        print(f"Selected scene: {CLIP_SCENES[best_idx]}")
-        return CLIP_SCENES[best_idx]
+        selected_scene = self.clip_scenes[best_idx]
+        selected_confidence = similarity[best_idx].item()
+        selected_keyword = CLIP_SCENES[selected_scene]
+        output = f"{selected_keyword}{selected_confidence:.2f}"
+        print(f"Selected scene: {output}")
+        return output
 
     def detect_faces(self, img: Image.Image):
         bboxes, embeddings, confidences = [], [], []
