@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import List
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -155,3 +156,13 @@ class DBManager:
             query = query.filter(Entry.date == filters["date"])
 
         return query.all()
+
+    def get_all_paths(self) -> List[str]:
+        """
+        Return all image paths in database
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        return [str(entry.path) for entry in self.session.query(Entry).all()]
+
