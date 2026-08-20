@@ -12,10 +12,11 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QHBoxLayout,
     QSizePolicy,
+    QPushButton,
     QFormLayout,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QPainter, QPen
+from PyQt6.QtGui import QAction, QPainter, QPen, QTransform
 from PyQt6.QtGui import QPixmap
 
 from app.common.exceptions import UnknownError
@@ -128,11 +129,23 @@ class MainWindow(QMainWindow):
         self.populate_list_from_db()
 
         # Center: image display (60%)
-        self.image_label = QLabel(self.main_widget)
+        # Container for image + controls
+        img_container = QWidget(self.main_widget)
+        img_v = QVBoxLayout()
+
+        self.image_label = QLabel(img_container)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.image_label.setMinimumSize(200, 200)
-        h.addWidget(self.image_label, 3)
+        img_v.addWidget(self.image_label, 1)
+
+        # Rotate left button
+        rotate_btn = QPushButton("Rotar", img_container)
+        rotate_btn.clicked.connect(self.rotate_left)
+        img_v.addWidget(rotate_btn, 0, Qt.AlignmentFlag.AlignCenter)
+
+        img_container.setLayout(img_v)
+        h.addWidget(img_container, 3)
 
         # Right: properties (20%)
         self.right_props = QWidget(self.main_widget)
@@ -146,6 +159,14 @@ class MainWindow(QMainWindow):
         form.addRow("Fecha de creación estimada:", self.prop_date)
         form.addRow("Modelo de cámara:", self.prop_camera)
         form.addRow("Tipo de escena:", self.prop_scene)
+        # Set labels to bold
+        for i in range(form.rowCount()):
+            label = form.itemAt(i, QFormLayout.ItemRole.LabelRole)
+            if label:
+                widget = label.widget()
+                if widget:
+                    widget.setStyleSheet("font-weight: bold;")
+
         self.right_props.setLayout(form)
         h.addWidget(self.right_props, 1)
 
@@ -243,6 +264,20 @@ class MainWindow(QMainWindow):
 
         self.log_status(f"Mostrando: {path.name}")
 
+    def rotate_left(self):
+        """Rotate the current pixmap 90 degrees counter-clockwise and update display."""
+        if not self._current_pixmap or self.image_label is None:
+            return
+
+        transform = QTransform().rotate(-90)
+        rotated = self._current_pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+        self._current_pixmap = rotated
+
+        scaled = rotated.scaled(
+            self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
+        self.image_label.setPixmap(scaled)
+        self.log_status("Imagen rotada a la izquierda")
 
     def resizeEvent(self, a0):
         # Ensure pixmap scales when window is resized
@@ -277,7 +312,6 @@ class MainWindow(QMainWindow):
         painter.end()
 
         return annotated
-
 
     def cargar_portafotos(self):
         path, _ = QFileDialog.getOpenFileName(
