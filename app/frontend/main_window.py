@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QPainter, QPen
 from PyQt6.QtGui import QPixmap
 
 from app.common.exceptions import UnknownError
@@ -24,13 +24,14 @@ from app.backend.data_processing import GalleryManager
 
 
 class MainWindow(QMainWindow):
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PortaFotos")
         self.resize(800, 600)
         self._create_status_bar()
         self._create_menu()
-        self._create_central_widget()
+        self._create_main_widget()
 
         self.database = None
         self.gallery = None
@@ -79,7 +80,7 @@ class MainWindow(QMainWindow):
         archivo_menu.addAction(cargar_action)
         archivo_menu.addAction(crear_action)
 
-    def _create_central_widget(self):
+    def _create_main_widget(self):
         self.main_widget = QWidget()
         self.main_layout = QVBoxLayout()
 
@@ -122,7 +123,7 @@ class MainWindow(QMainWindow):
         # Left: list of names (20%)
         self.img_list = QListWidget(self.main_widget)
         self.img_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        self.img_list.itemClicked.connect(self.on_list_item_clicked)
+        self.img_list.currentItemChanged.connect(self.on_list_current_changed)
         h.addWidget(self.img_list, 1)
         self.populate_list_from_db()
 
@@ -136,17 +137,19 @@ class MainWindow(QMainWindow):
         # Right: properties (20%)
         self.right_props = QWidget(self.main_widget)
         form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         self.prop_filename = QLabel("--")
-        self.prop_size = QLabel("--")
-        self.prop_dimensions = QLabel("--")
+        self.prop_date = QLabel("--")
+        self.prop_camera = QLabel("--")
+        self.prop_scene = QLabel("--")
         form.addRow("Nombre:", self.prop_filename)
-        form.addRow("Tamaño (bytes):", self.prop_size)
-        form.addRow("Dimensiones:", self.prop_dimensions)
+        form.addRow("Fecha de creación estimada:", self.prop_date)
+        form.addRow("Modelo de cámara:", self.prop_camera)
+        form.addRow("Tipo de escena:", self.prop_scene)
         self.right_props.setLayout(form)
         h.addWidget(self.right_props, 1)
 
         self.main_layout.addLayout(h)
-
 
     def populate_list_from_db(self) -> None:
         """Puebla `self.img_list` con entradas de la base de datos (usa entry.path)."""
@@ -160,11 +163,45 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, str(p))
             self.img_list.addItem(item)
 
-    def on_list_item_clicked(self, item: QListWidgetItem) -> None:
+    def keyPressEvent(self, a0):
+        """Allow navigating `self.img_list` with Up/Down arrows and update view.
+
+        Uses parameter name `a0` to match PyQt6 stubs and avoid type-checker override warnings.
+        """
+        if not a0:
+            return super().keyPressEvent(a0)
+        
+        key = a0.key()
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            if self.img_list is None:
+                return super().keyPressEvent(a0)
+
+            count = self.img_list.count()
+            if count == 0:
+                return super().keyPressEvent(a0)
+
+            current = self.img_list.currentRow()
+            if current < 0:
+                # No selection yet: start at first/last depending on key
+                new = 0 if key == Qt.Key.Key_Down else count - 1
+            else:
+                delta = 1 if key == Qt.Key.Key_Down else -1
+                new = max(0, min(count - 1, current + delta))
+
+            if new != current:
+                self.img_list.setCurrentRow(new)
+                item = self.img_list.currentItem()
+                if item is not None:
+                    self.on_list_current_changed(item, item)
+            return
+
+        return super().keyPressEvent(a0)
+    
+    def on_list_current_changed(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
         """ Carga la imagen seleccionada en la interfaz"""
 
         # Comprobar path seleccionado
-        path = item.data(Qt.ItemDataRole.UserRole)
+        path = current.data(Qt.ItemDataRole.UserRole)
         if not path:
             return
         path = Path(path)
@@ -180,7 +217,10 @@ class MainWindow(QMainWindow):
             self.log_status("No se pudo cargar la imagen")
             return
 
+        pix = self.draw_boxes_on_pixmap(pix, str(path))
+
         self._current_pixmap = pix
+
         if self.image_label:
             scaled = pix.scaled(
                 self.image_label.size(),
@@ -190,12 +230,16 @@ class MainWindow(QMainWindow):
             self.image_label.setPixmap(scaled)
 
         # Actualizar propiedades en la columna derecha
-        if hasattr(self, "prop_filename"):
-            self.prop_filename.setText(path.name)
-        if hasattr(self, "prop_size"):
-            self.prop_size.setText(str(path.stat().st_size))
-        if hasattr(self, "prop_dimensions"):
-            self.prop_dimensions.setText(f"{pix.width()} x {pix.height()}")
+        if self.database: # TODO etiquetas en negrita
+            img_properties = self.database.get_entry_properties(str(path))
+            if hasattr(self, "prop_filename"):
+                self.prop_filename.setText(path.name)
+            if hasattr(self, "prop_date"):
+                self.prop_date.setText(img_properties.get('date', 'Unknown'))
+            if hasattr(self, "prop_camera"):
+                self.prop_camera.setText(img_properties.get('camera_model', 'Unknown'))
+            if hasattr(self, "prop_scene"):
+                self.prop_scene.setText(img_properties.get('scene_type', 'Unknown'))
 
         self.log_status(f"Mostrando: {path.name}")
 
@@ -209,12 +253,38 @@ class MainWindow(QMainWindow):
             )
             self.image_label.setPixmap(scaled)
 
+    def draw_boxes_on_pixmap(self, pixmap, path):
+
+        if not self.database:
+            return pixmap
+
+        bboxes = self.database.get_bboxes(path)
+        if not bboxes or len(bboxes) == 0:
+            return pixmap
+
+        annotated = QPixmap(pixmap)
+
+        painter = QPainter(annotated)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        pen = QPen(Qt.GlobalColor.red)
+        pen.setWidth(int(min(pixmap.width(), pixmap.height()) / 200))
+        painter.setPen(pen)
+
+        for (x1, y1, x2, y2) in bboxes:
+            painter.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+
+        painter.end()
+
+        return annotated
+
+
     def cargar_portafotos(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Seleccionar portafotos o imagen",
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp);;PortaFotos DB (*.db);;All Files (*)",
+            "PortaFotos DB (*.db);;All Files (*)",
         )
 
         if not path:

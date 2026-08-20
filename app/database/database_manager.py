@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -165,4 +165,60 @@ class DBManager:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
         return [str(entry.path) for entry in self.session.query(Entry).all()]
+
+    def get_entry_properties(self, path: str) -> Dict[str, str]:
+        """
+        Return the properties of an entry given its path
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        return {
+            "date": str(entry.date),
+            "camera_model": str(entry.camera_model),
+            "scene_type": str(entry.scene_type)
+        }
+
+    def get_face_detections_by_path(self, path: str):
+        """
+        Return the face detections associated with an entry given its path.
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        return [
+            {
+                "id": det.id,
+                "index": det.index,
+                "bbox": det.bbox,
+                "confidence": det.confidence,
+                "identity_id": det.identity_id,
+                "embedding": det.embedding,
+            }
+            for det in entry.detections
+        ]
+
+    def get_bboxes(self, path: str):
+        """
+        Return the bounding boxes of an entry given its path
+        """
+
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        return [det.bbox for det in entry.detections]
+        
+
 
