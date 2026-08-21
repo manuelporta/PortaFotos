@@ -44,11 +44,11 @@ class DBManager:
     # --------------------------------------------------------
     # AÑADIR ENTRADA (IMAGEN)
     # --------------------------------------------------------
-    def add_entry(self, path, date, camera_model, scene_type):
+    def add_entry(self, path, date, camera_model, orientation, scene_type):
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
-        entry = Entry(path=path, date=date, camera_model=camera_model, scene_type=scene_type)
+        entry = Entry(path=path, date=date, camera_model=camera_model, orientation=orientation, scene_type=scene_type)
         self.session.add(entry)
         self.session.commit()
         return entry.id
@@ -180,7 +180,8 @@ class DBManager:
         return {
             "date": str(entry.date),
             "camera_model": str(entry.camera_model),
-            "scene_type": str(entry.scene_type)
+            "scene_type": str(entry.scene_type),
+            "orientation": str(entry.orientation)
         }
 
     def get_face_detections_by_path(self, path: str):

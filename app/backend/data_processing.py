@@ -96,9 +96,9 @@ class GalleryManager:
                 print(f"Error reading image:\n{e}")
                 continue
 
-            date, camera_model = self.extract_metadata(file)
+            date, camera_model, orientation = self.extract_metadata(file)
             scene_type = self.infer_scene(img)
-            entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, scene_type)
+            entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, orientation, scene_type)
             print(f"Entry added with ID: {entry_id}")
 
             # Detectar rostros y extraer embeddings
@@ -158,7 +158,10 @@ class GalleryManager:
                 camera_model = data[field]
                 break
 
-        return oldest_date, camera_model
+        # Extract orientation
+        orientation = data.get('Orientation', 'Unknown')
+
+        return oldest_date, camera_model, orientation
 
     def get_file_date(self, path: Path) -> datetime:
         try:

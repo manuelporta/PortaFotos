@@ -23,6 +23,11 @@ from app.common.exceptions import UnknownError
 from app.database.database_manager import DBManager
 from app.backend.data_processing import GalleryManager
 
+ORIENTATION_LUT = {
+    "Rotate 90 CW" : 90,
+    "Rotate 270 CW": -90,
+    "Rotate 180": 180
+}
 
 class MainWindow(QMainWindow):
 
@@ -139,10 +144,20 @@ class MainWindow(QMainWindow):
         self.image_label.setMinimumSize(200, 200)
         img_v.addWidget(self.image_label, 1)
 
-        # Rotate left button
-        rotate_btn = QPushButton("Rotar", img_container)
-        rotate_btn.clicked.connect(self.rotate_left)
-        img_v.addWidget(rotate_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        # Rotate buttons side-by-side
+        btn_row = QWidget(img_container)
+        btn_layout = QHBoxLayout()
+
+        rotate_left_btn = QPushButton("Rotar L", img_container)
+        rotate_left_btn.clicked.connect(self.rotate_left)
+        rotate_right_btn = QPushButton("Rotar R", img_container)
+        rotate_right_btn.clicked.connect(self.rotate_right)
+
+        btn_layout.addWidget(rotate_left_btn)
+        btn_layout.addWidget(rotate_right_btn)
+        btn_row.setLayout(btn_layout)
+
+        img_v.addWidget(btn_row, 0, Qt.AlignmentFlag.AlignCenter)
 
         img_container.setLayout(img_v)
         h.addWidget(img_container, 3)
@@ -221,6 +236,9 @@ class MainWindow(QMainWindow):
     def on_list_current_changed(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
         """ Carga la imagen seleccionada en la interfaz"""
 
+        if not self.database:
+            return
+
         # Comprobar path seleccionado
         path = current.data(Qt.ItemDataRole.UserRole)
         if not path:
@@ -233,12 +251,19 @@ class MainWindow(QMainWindow):
         self.current_path = path
 
         # Cargar imagen y mostrar en el panel central
+        img_properties = self.database.get_entry_properties(str(path))
         pix = QPixmap(str(path))
         if pix.isNull():
             self.log_status("No se pudo cargar la imagen")
             return
 
         pix = self.draw_boxes_on_pixmap(pix, str(path))
+
+        orientation = img_properties.get('orientation', 'none')
+        if orientation in ORIENTATION_LUT:
+            print(f"Orientation: {orientation}")
+            transform = QTransform().rotate(ORIENTATION_LUT[orientation])
+            pix = pix.transformed(transform, Qt.TransformationMode.SmoothTransformation)
 
         self._current_pixmap = pix
 
@@ -251,16 +276,15 @@ class MainWindow(QMainWindow):
             self.image_label.setPixmap(scaled)
 
         # Actualizar propiedades en la columna derecha
-        if self.database: # TODO etiquetas en negrita
-            img_properties = self.database.get_entry_properties(str(path))
-            if hasattr(self, "prop_filename"):
-                self.prop_filename.setText(path.name)
-            if hasattr(self, "prop_date"):
-                self.prop_date.setText(img_properties.get('date', 'Unknown'))
-            if hasattr(self, "prop_camera"):
-                self.prop_camera.setText(img_properties.get('camera_model', 'Unknown'))
-            if hasattr(self, "prop_scene"):
-                self.prop_scene.setText(img_properties.get('scene_type', 'Unknown'))
+        
+        if hasattr(self, "prop_filename"):
+            self.prop_filename.setText(path.name)
+        if hasattr(self, "prop_date"):
+            self.prop_date.setText(img_properties.get('date', 'Unknown'))
+        if hasattr(self, "prop_camera"):
+            self.prop_camera.setText(img_properties.get('camera_model', 'Unknown'))
+        if hasattr(self, "prop_scene"):
+            self.prop_scene.setText(img_properties.get('scene_type', 'Unknown'))
 
         self.log_status(f"Mostrando: {path.name}")
 
@@ -278,6 +302,22 @@ class MainWindow(QMainWindow):
         )
         self.image_label.setPixmap(scaled)
         self.log_status("Imagen rotada a la izquierda")
+
+    def rotate_right(self):
+        """Rotate the current pixmap 90 degrees clockwise and update display."""
+        if not self._current_pixmap or self.image_label is None:
+            return
+
+        transform = QTransform().rotate(90)
+        rotated = self._current_pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+        self._current_pixmap = rotated
+
+        scaled = rotated.scaled(
+            self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+        )
+        self.image_label.setPixmap(scaled)
+        self.log_status("Imagen rotada a la derecha")
+
 
     def resizeEvent(self, a0):
         # Ensure pixmap scales when window is resized
@@ -348,6 +388,8 @@ class MainWindow(QMainWindow):
             if dir_path.exists() and dir_path.is_dir():
                 # Check dir is not empty
                 if any(dir_path.iterdir()):
+                    self.log_status(f"Creando nuevo portafotos en: {dir_path}")
+                    self.info_label.setText(f"Creando nuevo portafotos en: {dir_path}")
 
                     db_path = dir_path / "portafotos.db"
                     self.gallery = GalleryManager(dir_path, db_path)
