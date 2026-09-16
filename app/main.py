@@ -1,37 +1,15 @@
-from pathlib import Path
-import argparse
-
-from app.backend.data_processing import GalleryManager
+from PyQt6.QtWidgets import QApplication
+from app.frontend.main_window import MainWindow
 
 
-def parse_args():
-    """Parse and validate CLI arguments.
+def main():
+    import sys
 
-    Returns:
-        argparse.Namespace with attribute `root_path` as a `pathlib.Path`.
-    """
-
-    def valid_root_path(path_str: str) -> Path:
-        p = Path(path_str)
-        if not p.exists():
-            raise argparse.ArgumentTypeError(f"La ruta '{path_str}' no existe")
-        if not p.is_dir():
-            raise argparse.ArgumentTypeError(f"La ruta '{path_str}' no es una carpeta")
-        return p
-
-    parser = argparse.ArgumentParser(description="Procesar una carpeta de imágenes")
-    parser.add_argument(
-        "root_path",
-        type=valid_root_path,
-        help="Ruta a la carpeta raíz que contiene las imágenes",
-    )
-
-    return parser.parse_args()
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    args = parse_args()
-
-    db_path = args.root_path / "portafotos.db"
-    gallery = GalleryManager(args.root_path, db_path)
-    gallery.create()
+    main()
