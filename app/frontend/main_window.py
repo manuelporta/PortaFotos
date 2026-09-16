@@ -23,11 +23,7 @@ from app.common.exceptions import UnknownError
 from app.database.database_manager import DBManager
 from app.backend.data_processing import GalleryManager
 
-ORIENTATION_LUT = {
-    "Rotate 90 CW" : 90,
-    "Rotate 270 CW": -90,
-    "Rotate 180": 180
-}
+from app.common.lookup import ORIENTATION_LUT
 
 class MainWindow(QMainWindow):
 
@@ -257,13 +253,12 @@ class MainWindow(QMainWindow):
             self.log_status("No se pudo cargar la imagen")
             return
 
-        pix = self.draw_boxes_on_pixmap(pix, str(path))
-
         orientation = img_properties.get('orientation', 'none')
         if orientation in ORIENTATION_LUT:
-            print(f"Orientation: {orientation}")
             transform = QTransform().rotate(ORIENTATION_LUT[orientation])
             pix = pix.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+
+        pix = self.draw_boxes_on_pixmap(pix, str(path))
 
         self._current_pixmap = pix
 
@@ -317,7 +312,6 @@ class MainWindow(QMainWindow):
         )
         self.image_label.setPixmap(scaled)
         self.log_status("Imagen rotada a la derecha")
-
 
     def resizeEvent(self, a0):
         # Ensure pixmap scales when window is resized
@@ -393,7 +387,13 @@ class MainWindow(QMainWindow):
 
                     db_path = dir_path / "portafotos.db"
                     self.gallery = GalleryManager(dir_path, db_path)
-                    self.gallery.create()
+                    self.gallery.read_images()
+                    if not self.gallery.files:
+                        self.log_status("La carpeta seleccionada está vacía.")
+                        return
+                    
+                    self.log_status(f"{len(self.gallery.files)} imágenes detectadas en {dir_path}. Iniciando procesado...")
+                    self.gallery.process_images()
 
                     self.log_status(f"Nuevo portafotos creado en: {dir_path}")
                     self.info_label.setText(f"Nuevo portafotos creado en: {dir_path}")

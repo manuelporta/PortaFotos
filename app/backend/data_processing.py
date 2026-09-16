@@ -3,7 +3,7 @@ import json
 import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Tuple
 
 import insightface
 import torch
@@ -11,7 +11,9 @@ import clip
 from PIL import Image, UnidentifiedImageError
 
 from app.database.database_manager import DBManager
+from app.common.lookup import ORIENTATION_LUT
 
+# TODO mover variables globales a archivo a parte
 IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
 DATE_FIELDS = [
     "DateTimeOriginal",
@@ -97,6 +99,8 @@ class GalleryManager:
                 continue
 
             date, camera_model, orientation = self.extract_metadata(file)
+            if orientation in ORIENTATION_LUT:
+                img = img.rotate(-ORIENTATION_LUT[orientation])
             scene_type = self.infer_scene(img)
             entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, orientation, scene_type)
             print(f"Entry added with ID: {entry_id}")
@@ -106,7 +110,7 @@ class GalleryManager:
 
             self.db.add_face_detections(entry_id, embeddings_list=face_embeddings, bboxes=bboxes, confidences=confidences)
 
-    def extract_metadata(self, path):
+    def extract_metadata(self, path: Path) -> Tuple[datetime, str, str]:
         """
         Obtain the oldest date and camera model from the image metadata using exiftool.
         If missing, return default values.
@@ -124,8 +128,9 @@ class GalleryManager:
 
         if not data or len(data) == 0:
             camera_model = "Unknown"
+            orientation = "Unknown"
             oldest_date = self.get_file_date(path)
-            return camera_model, oldest_date
+            return oldest_date, camera_model, orientation
             
 
         # Extaract older date
@@ -217,6 +222,7 @@ class GalleryManager:
             # x1, y1, x2, y2 = face.bbox
 
             embeddings.append(face.embedding.tolist())
+            # TODO rotar coordenadas!
             bboxes.append(face.bbox.tolist())
             confidences.append(face.det_score)
 
