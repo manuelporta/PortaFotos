@@ -173,10 +173,12 @@ class MainWindow(QMainWindow):
         self.prop_date = QLabel("--")
         self.prop_camera = QLabel("--")
         self.prop_scene = QLabel("--")
+        self.prop_orientation = QLabel("--")
         form.addRow("Nombre:", self.prop_filename)
         form.addRow("Fecha de creación estimada:", self.prop_date)
         form.addRow("Modelo de cámara:", self.prop_camera)
         form.addRow("Tipo de escena:", self.prop_scene)
+        form.addRow("Orientación:", self.prop_orientation)
         # Set labels to bold
         for i in range(form.rowCount()):
             label = form.itemAt(i, QFormLayout.ItemRole.LabelRole)
@@ -287,6 +289,8 @@ class MainWindow(QMainWindow):
             self.prop_camera.setText(img_properties.get('camera_model', 'Unknown'))
         if hasattr(self, "prop_scene"):
             self.prop_scene.setText(img_properties.get('scene_type', 'Unknown'))
+        if hasattr(self, "prop_orientation"):
+            self.prop_orientation.setText(img_properties.get('orientation', 'Unknown'))
 
         self.log_status(f"Mostrando: {path.name}")
 
@@ -399,7 +403,8 @@ class MainWindow(QMainWindow):
                         return
 
                     self.log_status(f"{len(self.gallery.files)} imágenes detectadas en {dir_path}. Iniciando procesado...")
-                    GalleryProcessor(self).process()
+                    self.gallery_processor = GalleryProcessor(self)
+                    self.gallery_processor.process()
                 else:
                     self.log_status("La carpeta seleccionada está vacía.")
             else:

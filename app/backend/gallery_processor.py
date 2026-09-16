@@ -30,6 +30,8 @@ class GalleryProcessor:
         self.main_window = main_window
         self.gallery = main_window.gallery
         self.progress_bar = main_window._progress_bar
+        self.thread = None
+        self.worker = None
 
     def process(self):
         """Start the gallery processing in a background thread."""
@@ -43,13 +45,14 @@ class GalleryProcessor:
             self.progress_bar.setRange(0, total)
             self.progress_bar.setValue(0)
 
-
         self.thread = QThread()
+        self.thread.setObjectName("ImageProcessingThread")
         self.worker = GalleryProcessingWorker(self.gallery)
         self.worker.moveToThread(self.thread)
 
         self.thread.started.connect(self.worker.run)
         self.worker.progress.connect(self._on_progress)
+        self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self._on_finished)
         self.worker.error.connect(self._on_error)
         self.worker.error.connect(self.thread.quit)
@@ -70,7 +73,7 @@ class GalleryProcessor:
             
         self.main_window.log_status(f"Processing {file_name} ({current}/{total})")
 
-    def _on_finished(self, gallery) -> None:
+    def _on_finished(self) -> None:
         """Handle completion of the gallery processing."""
         if self.progress_bar:
             self.progress_bar.setVisible(False)
