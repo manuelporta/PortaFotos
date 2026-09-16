@@ -11,7 +11,6 @@ import clip
 from PIL import Image, UnidentifiedImageError
 
 from app.database.database_manager import DBManager
-from app.common.lookup import ORIENTATION_LUT
 
 # TODO mover variables globales a archivo a parte
 IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
@@ -45,6 +44,13 @@ CLIP_SCENES = {
     "image without anything remarkable":"default"
 }
 
+PIL_ORIENTATION_LUT = {
+    "Rotate 90 CW" : Image.Transpose.ROTATE_270,
+    "Rotate 270 CW": Image.Transpose.ROTATE_90,
+    "Rotate 180": Image.Transpose.ROTATE_180
+}
+
+FACE_DET_THRESHOLD = 0.55 # 0.7
 
 class GalleryManager:
 
@@ -103,8 +109,8 @@ class GalleryManager:
                 continue
 
             date, camera_model, orientation = self.extract_metadata(file)
-            if orientation in ORIENTATION_LUT:
-                img = img.rotate(-ORIENTATION_LUT[orientation])
+            if orientation in PIL_ORIENTATION_LUT:
+                img = img.transpose(PIL_ORIENTATION_LUT[orientation])
             scene_type = self.infer_scene(img)
             entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, orientation, scene_type)
             print(f"Entry added with ID: {entry_id}")
@@ -220,10 +226,8 @@ class GalleryManager:
         faces = self.arcface.get(np_img_bgr)
 
         for face in faces:
-            if face.det_score < 0.7:
+            if face.det_score < FACE_DET_THRESHOLD:
                 continue
-
-            # x1, y1, x2, y2 = face.bbox
 
             embeddings.append(face.embedding.tolist())
             # TODO rotar coordenadas!

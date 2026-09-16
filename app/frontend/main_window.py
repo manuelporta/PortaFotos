@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         # Left: list of names (20%)
         self.img_list = QListWidget(self.main_widget)
         self.img_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        self.img_list.currentItemChanged.connect(self.on_list_current_changed)
+        self.img_list.currentItemChanged.connect(self.on_img_selected)
         h.addWidget(self.img_list, 1)
         self.populate_list_from_db()
 
@@ -233,12 +233,12 @@ class MainWindow(QMainWindow):
                 self.img_list.setCurrentRow(new)
                 item = self.img_list.currentItem()
                 if item is not None:
-                    self.on_list_current_changed(item, item)
+                    self.on_img_selected(item, item)
             return
 
         return super().keyPressEvent(a0)
     
-    def on_list_current_changed(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
+    def on_img_selected(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
         """ Carga la imagen seleccionada en la interfaz"""
 
         if not self.database:
@@ -399,18 +399,18 @@ class MainWindow(QMainWindow):
                     self.gallery = GalleryManager(dir_path, db_path)
                     self.gallery.read_images()
                     if not self.gallery.files:
-                        self.log_status("La carpeta seleccionada está vacía.")
+                        self.info_label.setText("La carpeta seleccionada está vacía.")
                         return
 
-                    self.log_status(f"{len(self.gallery.files)} imágenes detectadas en {dir_path}. Iniciando procesado...")
+                    self.info_label.setText(f"{len(self.gallery.files)} imágenes detectadas en {dir_path}. Iniciando procesado...")
                     self.gallery_processor = GalleryProcessor(self)
                     self.gallery_processor.process()
                 else:
-                    self.log_status("La carpeta seleccionada está vacía.")
+                    self.info_label.setText("La carpeta seleccionada está vacía.")
             else:
-                self.log_status("La ruta introducida no corresponde a una carpeta.")
+                self.info_label.setText("La ruta introducida no corresponde a una carpeta.")
         else:
-            self.log_status("No se ha introducido ninguna ruta.")
+            self.info_label.setText("No se ha introducido ninguna ruta.")
 
 
 
