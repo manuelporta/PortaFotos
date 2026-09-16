@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QPushButton,
     QFormLayout,
+    QProgressBar,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QPainter, QPen, QTransform
@@ -22,8 +23,10 @@ from PyQt6.QtGui import QPixmap
 from app.common.exceptions import UnknownError
 from app.database.database_manager import DBManager
 from app.backend.data_processing import GalleryManager
+from app.backend.gallery_processor import GalleryProcessor
 
 from app.common.lookup import ORIENTATION_LUT
+
 
 class MainWindow(QMainWindow):
 
@@ -49,15 +52,19 @@ class MainWindow(QMainWindow):
         self.setStatusBar(status)
 
         self._status_label = QLabel("Cargando", self)
-        # Add as a permanent widget so it stays visible on the right; use addWidget to align left
         status.addPermanentWidget(self._status_label)
+
+        self._progress_bar = QProgressBar(self)
+        self._progress_bar.setVisible(False)
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        status.addPermanentWidget(self._progress_bar)
 
     def log_status(self, message: str) -> None:
         """Update the bottom status label with a short message."""
         if hasattr(self, "_status_label") and self._status_label is not None:
             self._status_label.setText(message)
         else:
-            # Fallback to statusBar message if label not present
             status_bar = self.statusBar()
             if status_bar:
                 status_bar.showMessage(message)
@@ -380,7 +387,6 @@ class MainWindow(QMainWindow):
         if dir_path:
             dir_path = Path(dir_path)
             if dir_path.exists() and dir_path.is_dir():
-                # Check dir is not empty
                 if any(dir_path.iterdir()):
                     self.log_status(f"Creando nuevo portafotos en: {dir_path}")
                     self.info_label.setText(f"Creando nuevo portafotos en: {dir_path}")
@@ -391,12 +397,9 @@ class MainWindow(QMainWindow):
                     if not self.gallery.files:
                         self.log_status("La carpeta seleccionada está vacía.")
                         return
-                    
-                    self.log_status(f"{len(self.gallery.files)} imágenes detectadas en {dir_path}. Iniciando procesado...")
-                    self.gallery.process_images()
 
-                    self.log_status(f"Nuevo portafotos creado en: {dir_path}")
-                    self.info_label.setText(f"Nuevo portafotos creado en: {dir_path}")
+                    self.log_status(f"{len(self.gallery.files)} imágenes detectadas en {dir_path}. Iniciando procesado...")
+                    GalleryProcessor(self).process()
                 else:
                     self.log_status("La carpeta seleccionada está vacía.")
             else:

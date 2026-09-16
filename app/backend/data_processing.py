@@ -85,13 +85,17 @@ class GalleryManager:
 
         self.files = [file for file in files if file.suffix.lower() in IMG_EXTENSIONS]
 
-    def process_images(self):
+    def process_images(self, on_progress: Callable[[int, int, str], None] | None = None):
         if self.files is None:
             raise ValueError("No images read. Call read_images() first.")
 
-        for file in self.files:
+        total = len(self.files)
+        for index, file in enumerate(self.files, start=1):
+            if on_progress:
+                on_progress(index, total, file.name)
+
             print(f"Adding image: {file}")
-            
+
             try:
                 img = Image.open(file)
             except UnidentifiedImageError as e:
