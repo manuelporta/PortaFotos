@@ -19,7 +19,7 @@ class Entry(Base):
     date = Column(DateTime, default=datetime.now)
     orientation = Column(String, default='Unknown')
     camera_model = Column(String, default='Unknown')
-    scene_type = Column(String, default='Unknown')
+    scene_type = Column(JSON, default=list, nullable=True)  # lista ordenada de cadenas
 
     detections = relationship("FaceDetection", cascade="all, delete-orphan")
 

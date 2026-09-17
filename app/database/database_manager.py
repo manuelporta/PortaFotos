@@ -1,10 +1,10 @@
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database.database_dependencies import Base, Entry, FaceDetection, Identity
+from app.database.database_definitions import Base, Entry, FaceDetection, Identity
 
 class DBManager:
     def __init__(self, db_path: Path | None = None):
@@ -40,6 +40,24 @@ class DBManager:
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.session = self.Session()
+
+    def close(self):
+        """Cierra la sesión y libera el motor de la base de datos."""
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+
+        if self.engine is not None:
+            self.engine.dispose()
+            self.engine = None
+
+        self.Session = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     # --------------------------------------------------------
     # AÑADIR ENTRADA (IMAGEN)
@@ -166,7 +184,7 @@ class DBManager:
 
         return [str(entry.path) for entry in self.session.query(Entry).all()]
 
-    def get_entry_properties(self, path: str) -> Dict[str, str]:
+    def get_entry_properties(self, path: str) -> Dict[str, Any]:
         """
         Return the properties of an entry given its path
         """
@@ -180,7 +198,7 @@ class DBManager:
         return {
             "date": str(entry.date),
             "camera_model": str(entry.camera_model),
-            "scene_type": str(entry.scene_type),
+            "scene_type": entry.scene_type if isinstance(entry.scene_type, list) else str(entry.scene_type),
             "orientation": str(entry.orientation)
         }
 

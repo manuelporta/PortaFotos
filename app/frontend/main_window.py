@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QFormLayout,
     QProgressBar,
+    QMessageBox,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QPainter, QPen, QTransform
@@ -129,7 +131,7 @@ class MainWindow(QMainWindow):
         # Create horizontal layout with 20/60/20 stretches (1:3:1)
         h = QHBoxLayout()
 
-        # Left: list of names (20%)
+        # Left: list of images (20%)
         self.img_list = QListWidget(self.main_widget)
         self.img_list.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.img_list.currentItemChanged.connect(self.on_img_selected)
@@ -137,7 +139,6 @@ class MainWindow(QMainWindow):
         self.populate_list_from_db()
 
         # Center: image display (60%)
-        # Container for image + controls
         img_container = QWidget(self.main_widget)
         img_v = QVBoxLayout()
 
@@ -147,7 +148,7 @@ class MainWindow(QMainWindow):
         self.image_label.setMinimumSize(200, 200)
         img_v.addWidget(self.image_label, 1)
 
-        # Rotate buttons side-by-side
+        # Center-down: rotate buttons
         btn_row = QWidget(img_container)
         btn_layout = QHBoxLayout()
 
@@ -172,13 +173,15 @@ class MainWindow(QMainWindow):
         self.prop_filename = QLabel("--")
         self.prop_date = QLabel("--")
         self.prop_camera = QLabel("--")
-        self.prop_scene = QLabel("--")
         self.prop_orientation = QLabel("--")
+        self.prop_scene = QLabel("--")
+        self.prop_scene.setWordWrap(True)
         form.addRow("Nombre:", self.prop_filename)
         form.addRow("Fecha de creación estimada:", self.prop_date)
         form.addRow("Modelo de cámara:", self.prop_camera)
-        form.addRow("Tipo de escena:", self.prop_scene)
         form.addRow("Orientación:", self.prop_orientation)
+        form.addRow("Tipo de escena:", self.prop_scene)
+
         # Set labels to bold
         for i in range(form.rowCount()):
             label = form.itemAt(i, QFormLayout.ItemRole.LabelRole)
@@ -241,9 +244,6 @@ class MainWindow(QMainWindow):
     def on_img_selected(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
         """ Carga la imagen seleccionada en la interfaz"""
 
-        if not self.database:
-            return
-
         # Comprobar path seleccionado
         path = current.data(Qt.ItemDataRole.UserRole)
         if not path:
@@ -256,6 +256,22 @@ class MainWindow(QMainWindow):
         self.current_path = path
 
         # Cargar imagen y mostrar en el panel central
+        img_properties = self.display_img(path)
+        if img_properties is None:
+            return
+
+        # Actualizar propiedades en la columna derecha
+        self.display_properties(path, img_properties)
+
+
+        self.log_status(f"Mostrando: {path.name}")
+
+    def display_img(self, path):
+        """Display the current image in the central panel."""
+
+        if not self.database:
+            return None
+        
         img_properties = self.database.get_entry_properties(str(path))
         pix = QPixmap(str(path))
         if pix.isNull():
@@ -279,20 +295,28 @@ class MainWindow(QMainWindow):
             )
             self.image_label.setPixmap(scaled)
 
-        # Actualizar propiedades en la columna derecha
-        
+        return img_properties
+
+    def display_properties(self, path, img_properties):
+        """Display the properties of the current image in the right panel."""
+        if not img_properties:
+            return
+
         if hasattr(self, "prop_filename"):
             self.prop_filename.setText(path.name)
         if hasattr(self, "prop_date"):
             self.prop_date.setText(img_properties.get('date', 'Unknown'))
         if hasattr(self, "prop_camera"):
             self.prop_camera.setText(img_properties.get('camera_model', 'Unknown'))
-        if hasattr(self, "prop_scene"):
-            self.prop_scene.setText(img_properties.get('scene_type', 'Unknown'))
         if hasattr(self, "prop_orientation"):
             self.prop_orientation.setText(img_properties.get('orientation', 'Unknown'))
-
-        self.log_status(f"Mostrando: {path.name}")
+        if hasattr(self, "prop_scene"):
+            scene_value = img_properties.get('scene_type', 'Unknown')
+            if isinstance(scene_value, (list, tuple)):
+                text = "<br>".join(str(item) for item in scene_value)
+            else:
+                text = str(scene_value)
+            self.prop_scene.setText(text)
 
     def rotate_left(self):
         """Rotate the current pixmap 90 degrees counter-clockwise and update display."""
@@ -332,6 +356,11 @@ class MainWindow(QMainWindow):
                 self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
             )
             self.image_label.setPixmap(scaled)
+
+    def closeEvent(self, a0):
+        if self.database is not None:
+            self.database.close()
+        super().closeEvent(a0)
 
     def draw_boxes_on_pixmap(self, pixmap, path):
 
@@ -386,6 +415,45 @@ class MainWindow(QMainWindow):
         # Unknown type fallback
         self.log_status("Tipo de archivo no soportado.")
 
+    def ask_db_name(self, dir_path: Path):
+        """Solicita al usuario el nombre de la base de datos a crear."""
+        nombre, ok = QInputDialog.getText(
+            self,
+            "Nombre de la base de datos",
+            "Escribe el nombre que quieres poner a la base de datos:",
+            text="portafotos",
+        )
+
+        if not ok or not nombre.strip():
+            self.log_status("Operación cancelada por el usuario.")
+            self.info_label.setText("Operación cancelada por el usuario.")
+            return None
+
+        nombre = nombre.strip()
+        if not nombre.lower().endswith(".db"):
+            nombre = f"{nombre}.db"
+
+        return dir_path / nombre
+
+    def ask_overwrite(self, db_path: Path) -> bool:
+        """Ask the user if they want to overwrite an existing database."""
+        reply = QMessageBox.question(
+            self,
+            "Sobrescribir base de datos",
+            f"La base de datos {db_path.name} ya existe.\n\n¿Deseas sobrescribirla y continuar?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            self.log_status("Operación cancelada por el usuario.")
+            self.info_label.setText("Operación cancelada por el usuario.")
+            return False
+
+        self.log_status(f"Advertencia: {db_path} ya existe y será sobrescrito.")
+        self.info_label.setText(f"Advertencia: {db_path} ya existe y será sobrescrito.")
+
+        return reply == QMessageBox.StandardButton.Yes
+
     def crear_portafotos(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para nuevo portafotos")
         if dir_path:
@@ -395,7 +463,17 @@ class MainWindow(QMainWindow):
                     self.log_status(f"Creando nuevo portafotos en: {dir_path}")
                     self.info_label.setText(f"Creando nuevo portafotos en: {dir_path}")
 
-                    db_path = dir_path / "portafotos.db"
+                    db_path = self.ask_db_name(dir_path)
+
+                    if db_path is None:
+                        return
+
+                    if db_path.exists():
+                        if not self.ask_overwrite(db_path):
+                            return
+                        else:
+                            db_path.unlink()
+                        
                     self.gallery = GalleryManager(dir_path, db_path)
                     self.gallery.read_images()
                     if not self.gallery.files:

@@ -11,46 +11,7 @@ import clip
 from PIL import Image, UnidentifiedImageError
 
 from app.database.database_manager import DBManager
-
-# TODO mover variables globales a archivo a parte
-IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".gif"}
-DATE_FIELDS = [
-    "DateTimeOriginal",
-    "CreateDate",
-    "ModifyDate",
-    "MetadataDate",
-    "FileCreationDateTime",
-    "FileModificationDateTime",
-    "FileAccessDateTime",
-]
-CAMERA_FIELDS = ["Model", "CameraModelName", "Make"]
-
-CLIP_SCENES = {
-    "close-up photo of a person":"portrait", 
-    "photo of one or more animals":"animals",
-    "photo of people playing sports":"sports",
-    "digital or hand-made drawing":"drawing",
-    "computer or smartphone screenshot":"screenshot",
-    "document with written text":"text",
-    "photo of one or more objects":"objects",
-    "selfie":"selfie",
-    "group photo":"group",
-    "photo of a landscape":"landscape",
-    "photo of an architectural work":"landscape",
-    "photo of a music show":"concert",
-    "food or drink photo":"food",
-    "funny meme image":"meme",
-    "photo of one or more vehicles":"cars",
-    "image without anything remarkable":"default"
-}
-
-PIL_ORIENTATION_LUT = {
-    "Rotate 90 CW" : Image.Transpose.ROTATE_270,
-    "Rotate 270 CW": Image.Transpose.ROTATE_90,
-    "Rotate 180": Image.Transpose.ROTATE_180
-}
-
-FACE_DET_THRESHOLD = 0.55 # 0.7
+from app.backend import globals
 
 class GalleryManager:
 
@@ -70,7 +31,7 @@ class GalleryManager:
         self.scene_features: torch.Tensor
 
         self.model, self.preprocess = clip.load("ViT-B/32", device=self.device)
-        self.clip_scenes = list(CLIP_SCENES.keys())
+        self.clip_scenes = list(globals.CLIP_SCENES.keys())
         scene_tokens = clip.tokenize(self.clip_scenes).to(self.device)
         self.scene_features = self.model.encode_text(scene_tokens)
         self.scene_features /= self.scene_features.norm(dim=-1, keepdim=True)
@@ -86,10 +47,10 @@ class GalleryManager:
     def read_images(self):
         files = [file for file in self.root_path.rglob("*")]
         files_extensions = set([file.suffix.lower() for file in files])
-        if unknown_extensions:=files_extensions - IMG_EXTENSIONS:
+        if unknown_extensions:=files_extensions - globals.IMG_EXTENSIONS:
             print(f"Unknown extensions found: {unknown_extensions}")
 
-        self.files = [file for file in files if file.suffix.lower() in IMG_EXTENSIONS]
+        self.files = [file for file in files if file.suffix.lower() in globals.IMG_EXTENSIONS]
 
     def process_images(self, on_progress: Callable[[int, int, str], None] | None = None):
         if self.files is None:
@@ -100,8 +61,6 @@ class GalleryManager:
             if on_progress:
                 on_progress(index, total, file.name)
 
-            print(f"Adding image: {file}")
-
             try:
                 img = Image.open(file)
             except UnidentifiedImageError as e:
@@ -109,11 +68,10 @@ class GalleryManager:
                 continue
 
             date, camera_model, orientation = self.extract_metadata(file)
-            if orientation in PIL_ORIENTATION_LUT:
-                img = img.transpose(PIL_ORIENTATION_LUT[orientation])
+            if orientation in globals.PIL_ORIENTATION_LUT:
+                img = img.transpose(globals.PIL_ORIENTATION_LUT[orientation])
             scene_type = self.infer_scene(img)
             entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, orientation, scene_type)
-            print(f"Entry added with ID: {entry_id}")
 
             # Detectar rostros y extraer embeddings
             bboxes, face_embeddings, confidences = self.detect_faces(img)
@@ -146,7 +104,7 @@ class GalleryManager:
         # Extaract older date
         dates = []
 
-        for field in DATE_FIELDS:
+        for field in globals.DATE_FIELDS:
             if field in data:
                 try:
                     # Normalizar formato EXIF: YYYY:MM:DD HH:MM:SS
@@ -168,7 +126,7 @@ class GalleryManager:
 
         # Extract camera model
         camera_model = "Unknown"
-        for field in CAMERA_FIELDS:
+        for field in globals.CAMERA_FIELDS:
             if field in data:
                 camera_model = data[field]
                 break
@@ -209,13 +167,17 @@ class GalleryManager:
             similarity = (image_features @ self.scene_features.T).squeeze(0)
 
         # Resultado
-        best_idx = similarity.argmax().item()
-        # TODO añadir umbral
-        selected_scene = self.clip_scenes[best_idx]
-        selected_confidence = similarity[best_idx].item()
-        selected_keyword = CLIP_SCENES[selected_scene]
-        output = f"{selected_keyword}{selected_confidence:.2f}"
-        print(f"Selected scene: {output}")
+
+        sorted_idx = similarity.argsort(descending=True).cpu().numpy()
+        conf_th = similarity[sorted_idx[0]].item() - 0.02
+        output = []
+        for idx in sorted_idx:
+            confidence = similarity[idx].item()
+            if confidence < conf_th:
+                break
+            scene = self.clip_scenes[idx]
+            keyword = globals.CLIP_SCENES[scene]
+            output.append(f"{keyword}:{confidence:.2f}")
         return output
 
     def detect_faces(self, img: Image.Image):
@@ -226,7 +188,7 @@ class GalleryManager:
         faces = self.arcface.get(np_img_bgr)
 
         for face in faces:
-            if face.det_score < FACE_DET_THRESHOLD:
+            if face.det_score < globals.FACE_DET_THRESHOLD:
                 continue
 
             embeddings.append(face.embedding.tolist())
