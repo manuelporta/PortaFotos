@@ -26,6 +26,7 @@ from app.common.exceptions import UnknownError
 from app.database.database_manager import DBManager
 from app.backend.data_processing import GalleryManager
 from app.backend.gallery_processor import GalleryProcessor
+from app.frontend.person_identification_window import PersonIdentificationWindow
 
 from app.common.lookup import ORIENTATION_LUT
 
@@ -36,12 +37,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("PortaFotos")
         self.resize(800, 600)
-        self._create_status_bar()
-        self._create_menu()
-        self._create_main_widget()
 
         self.database = None
         self.gallery = None
+
+        self._create_status_bar()
+        self._create_menu()
+        self._create_main_widget()
 
         self._current_pixmap = None
         self.current_path = None
@@ -84,12 +86,29 @@ class MainWindow(QMainWindow):
 
         cargar_action = QAction("Cargar portafotos", self)
         crear_action = QAction("Crear nuevo portafotos", self)
+        self.identificar_action = QAction("Identificar personas", self)
+        self.identificar_action.setEnabled(self.database is not None)
 
         cargar_action.triggered.connect(self.cargar_portafotos)
         crear_action.triggered.connect(self.crear_portafotos)
+        self.identificar_action.triggered.connect(self.identificate_faces)
 
         archivo_menu.addAction(cargar_action)
         archivo_menu.addAction(crear_action)
+        archivo_menu.addAction(self.identificar_action)
+
+    def _refresh_menu_actions(self):
+        if hasattr(self, "identificar_action"):
+            self.identificar_action.setEnabled(self.database is not None)
+
+    def identificate_faces(self):
+        if self.database is None:
+            self.log_status("No hay ninguna galería cargada")
+            return
+
+        self.log_status("Abriendo ventana de identificación de personas")
+        window = PersonIdentificationWindow(self.database, self)
+        window.exec()
 
     def _create_main_widget(self):
         self.main_widget = QWidget()
@@ -404,13 +423,14 @@ class MainWindow(QMainWindow):
             self.log_status("La ruta introducida no corresponde a un archivo.")
             return
 
-        # If a database was selected, preserve old behavior
+        # If a database was selected, load it
         if path.suffix.lower() == ".db":
             self.database = DBManager(path)
             self.info_label.setText(f"Cargado DB: {path}")
             self.log_status(f"Cargado DB: {path}")
 
             self._init_layout()
+            self._refresh_menu_actions()
 
         # Unknown type fallback
         self.log_status("Tipo de archivo no soportado.")

@@ -83,6 +83,7 @@ class GalleryProcessor:
         if self.gallery:
             self.main_window.database = self.gallery.db
             self.main_window._init_layout()
+            self.main_window._refresh_menu_actions()
 
 
     def _on_error(self, error_message: str) -> None:

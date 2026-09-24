@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import create_engine
+from sqlalchemy import Column, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database.database_definitions import Base, Entry, FaceDetection, Identity
@@ -161,6 +161,7 @@ class DBManager:
     # BUSCAR ENTRADAS
     # --------------------------------------------------------
     def search_entries(self, **filters):
+        # TODO not used yet, but can be used to filter by date, camera_model, scene_type, etc.
 
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
@@ -205,6 +206,7 @@ class DBManager:
     def get_face_detections_by_path(self, path: str):
         """
         Return the face detections associated with an entry given its path.
+        TODO: not used yet
         """
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
@@ -225,7 +227,7 @@ class DBManager:
             for det in entry.detections
         ]
 
-    def get_bboxes(self, path: str):
+    def get_bboxes(self, path: str) -> List[List[float]]:
         """
         Return the bounding boxes of an entry given its path
         """
@@ -238,6 +240,25 @@ class DBManager:
             raise ValueError("Entry no existe")
 
         return [det.bbox for det in entry.detections]
-        
+
+    def get_det_from_id(self, detection_id: int) -> Tuple[str, List[float]]:
+        """
+        Return the file path and bounding box of a detection given its ID
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        det = self.session.query(FaceDetection).filter_by(id=detection_id).first()
+        if det is None:
+            raise ValueError("Detección no existe")
+
+        entry = self.session.query(Entry).filter_by(id=det.entry_id).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        if isinstance(det.bbox, list):
+            return str(entry.path), det.bbox
+        else:
+            raise ValueError("Bounding box no es una lista válida")
 
 

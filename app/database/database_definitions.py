@@ -53,7 +53,7 @@ class FaceDetection(Base):
     confidence = Column(Float, nullable=True)
 
     # Identidad global (opcional)
-    identity_id = Column(Integer, ForeignKey("identities.id"), nullable=True)
+    identity_id = Column(String, ForeignKey("identities.id"), nullable=True)
 
     entry = relationship("Entry", back_populates="detections")
     identity = relationship("Identity", back_populates="detections")

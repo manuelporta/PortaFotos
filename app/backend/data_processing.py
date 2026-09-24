@@ -151,7 +151,6 @@ class GalleryManager:
         else:
             return min(dates)
 
-
     def infer_scene(self, img: Image.Image):
         """
         Infer scene label using CLIP
