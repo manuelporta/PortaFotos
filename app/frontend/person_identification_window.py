@@ -62,7 +62,13 @@ class PersonIdentificationWindow(QDialog):
         self.scroll_area.setWidget(self.image_container)
         main_layout.addWidget(self.scroll_area, 1)
 
+        self.current_checkboxes = {}
+
         form_layout = QHBoxLayout()
+        self.toggle_all_button = QPushButton("Desmarcar todas", self)
+        self.toggle_all_button.clicked.connect(self._toggle_all_checkboxes)
+        form_layout.addWidget(self.toggle_all_button)
+
         form_layout.addWidget(QLabel("Etiqueta:"))
         self.name_input = QLineEdit(self)
         self.name_input.setPlaceholderText("Inserta el nombre o etiqueta de la persona")
@@ -75,6 +81,8 @@ class PersonIdentificationWindow(QDialog):
         main_layout.addLayout(form_layout)
 
     def _load_detections(self):
+
+        keep_labels = self._ask_keep_labels()
 
         msg_label = QLabel("Cargando clusters de imágenes...")
         self.image_grid.addWidget(msg_label, 0, 0)
@@ -89,8 +97,10 @@ class PersonIdentificationWindow(QDialog):
         detection_ids = []
         embeddings = []
 
-        for detection_id, embedding in detections:
+        for detection_id, embedding, identity_id in detections:
             if embedding is None:
+                continue
+            if keep_labels and identity_id is not None:
                 continue
             detection_ids.append(detection_id)
             embeddings.append(np.asarray(embedding, dtype=np.float64))
@@ -132,8 +142,6 @@ class PersonIdentificationWindow(QDialog):
 
         self.cluster_to_detections = {}
         for det_id, label in self.detection_clusters.items():
-            if label == -1:
-                continue
             self.cluster_to_detections.setdefault(int(label), []).append(det_id)
 
         if cluster_count == 0:
@@ -146,14 +154,22 @@ class PersonIdentificationWindow(QDialog):
 
         self.next_button.setEnabled(True)
         self.name_input.setEnabled(True)
-        # TODO delete this variable if not used
-        self.clustered_files = [
-            det_id
-            for cluster_ids in self.cluster_to_detections.values()
-            for det_id in cluster_ids
-        ]
+
+
+    def _ask_keep_labels(self):
+        reply = QMessageBox.question(
+            self,
+            "Mantener etiquetas existentes",
+            "¿Desea mantener las etiquetas existentes en la base de datos?\n"
+            "Si selecciona 'No', se eliminarán todas las etiquetas anteriores.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _display_detections(self, n: int = 0):
+
+        self._clear_image_grid()
 
         if not self.cluster_to_detections or len(self.cluster_to_detections) == 0:
             empty_label = QLabel("No hay imágenes disponibles para identificar.")
@@ -164,17 +180,9 @@ class PersonIdentificationWindow(QDialog):
             self.image_grid.addWidget(empty_label, 0, 0)
             return
 
-        # clean self.image_grid
-        for i in reversed(range(self.image_grid.count())):
-            item = self.image_grid.itemAt(i)
-            if item is not None:
-                widget = item.widget()
-                if widget is not None:
-                    widget.setParent(None)
-
-
         cluster_ids = list(self.cluster_to_detections.keys())
         det_ids = self.cluster_to_detections[cluster_ids[n]]
+        self.current_checkboxes = {}
         for index, det_id in enumerate(det_ids):
             card = self._create_image_card(det_id)
             row = index // 3
@@ -184,6 +192,28 @@ class PersonIdentificationWindow(QDialog):
         self.image_grid.setColumnStretch(0, 1)
         self.image_grid.setColumnStretch(1, 1)
         self.image_grid.setColumnStretch(2, 1)
+        self._update_toggle_all_button()
+
+        # Reset scroll position to top-left
+        vertical_scroll_bar = self.scroll_area.verticalScrollBar()
+        if vertical_scroll_bar is not None:
+            vertical_scroll_bar.setValue(0)
+
+        horizontal_scroll_bar = self.scroll_area.horizontalScrollBar()
+        if horizontal_scroll_bar is not None:
+            horizontal_scroll_bar.setValue(0)
+
+    def _clear_image_grid(self):
+        """ Clear all widgets from the image grid layout."""
+
+        for i in reversed(range(self.image_grid.count())):
+            item = self.image_grid.itemAt(i)
+            if item is not None:
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+
+        return
 
     def _create_image_card(self, det_id):
         card = QWidget(self.image_container)
@@ -227,12 +257,17 @@ class PersonIdentificationWindow(QDialog):
         # create checkbox
         checkbox = QCheckBox(Path(file_path).name, card)
         checkbox.setChecked(True)
-        checkbox.toggled.connect(lambda checked, p=det_id: self._toggle_image_selection(p, checked))
+        checkbox.toggled.connect(lambda checked, p=det_id: self._handle_checkbox_toggle(p, checked))
         card_layout.addWidget(checkbox)
+        self.current_checkboxes[str(det_id)] = checkbox
 
         self.selected_faces.add(str(det_id))
-        
+
         return card
+
+    def _handle_checkbox_toggle(self, file_path, checked):
+        self._toggle_image_selection(file_path, checked)
+        self._update_toggle_all_button()
 
     def _toggle_image_selection(self, file_path, checked):
         path = str(file_path)
@@ -241,25 +276,51 @@ class PersonIdentificationWindow(QDialog):
         else:
             self.selected_faces.discard(path)
 
+    def _toggle_all_checkboxes(self):
+        if not self.current_checkboxes:
+            return
+
+        should_check = not all(checkbox.isChecked() for checkbox in self.current_checkboxes.values())
+        for checkbox in self.current_checkboxes.values():
+            checkbox.setChecked(should_check)
+
+        self._update_toggle_all_button()
+
+    def _update_toggle_all_button(self):
+        if not hasattr(self, "toggle_all_button"):
+            return
+
+        if not self.current_checkboxes:
+            self.toggle_all_button.setText("Marcar todas")
+            return
+
+        all_checked = all(checkbox.isChecked() for checkbox in self.current_checkboxes.values())
+        self.toggle_all_button.setText("Desmarcar todas" if all_checked else "Marcar todas")
+
     def on_next_clicked(self):
         selected_count = len(self.selected_faces)
-        if selected_count == 0:
-            QMessageBox.warning(self, "Sin selección", "No se guardará ninguna identidad.")
-
         label = self.name_input.text().strip()
-        if not label:
-            QMessageBox.warning(self, "Falta la etiqueta", "Introduce una etiqueta o nombre para continuar.")
+        
+        if selected_count == 0 or not label:
+            reply = QMessageBox.question(
+                        self,
+                        "Continuar sin guardar identidad",
+                        f"No se ha etiquetado ningún rostro. ¿Desea continuar?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes,
+                    )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.go_next()
+            
             return
 
         for det_id in self.selected_faces:
             self.database.assign_identity(det_id, label)
 
-        QMessageBox.information(
-            self,
-            "Éxito",
-            f"Se han etiquetado {selected_count} con el nombre {label}",
-        )
+        self.go_next()
 
+    def go_next(self):
+        self.selected_faces.clear()
+        self.name_input.clear()
         self.cluster_index += 1
         self._display_detections(self.cluster_index)
-

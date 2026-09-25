@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QInputDialog,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRect, Qt
 from PyQt6.QtGui import QAction, QPainter, QPen, QTransform
 from PyQt6.QtGui import QPixmap
 
@@ -386,8 +386,8 @@ class MainWindow(QMainWindow):
         if not self.database:
             return pixmap
 
-        bboxes = self.database.get_bboxes(path)
-        if not bboxes or len(bboxes) == 0:
+        dets = self.database.get_dets(path)
+        if not dets or len(dets) == 0:
             return pixmap
 
         annotated = QPixmap(pixmap)
@@ -395,16 +395,46 @@ class MainWindow(QMainWindow):
         painter = QPainter(annotated)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        pen = QPen(Qt.GlobalColor.red)
-        pen.setWidth(int(min(pixmap.width(), pixmap.height()) / 200))
-        painter.setPen(pen)
+        bbox_pen = QPen(Qt.GlobalColor.red)
+        bbox_pen.setWidth(int(min(pixmap.width(), pixmap.height()) / 200))
+        painter.setPen(bbox_pen)
 
-        for (x1, y1, x2, y2) in bboxes:
-            painter.drawRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+        for bbox, face_id in dets:
+            self.draw_detection(painter, bbox_pen, bbox, face_id)
 
         painter.end()
 
         return annotated
+
+    def draw_detection(self, painter: QPainter, bbox_pen: QPen, bbox: list, face_id: str):
+        """Draw a single detection box and label on the given QPainter."""
+        x1, y1, x2, y2 = bbox
+        rect_w = int(x2 - x1)
+        rect_h = int(y2 - y1)
+        rect = QRect(int(x1), int(y1), rect_w, rect_h)
+
+        painter.setPen(bbox_pen)
+        painter.drawRect(rect)
+
+        if not face_id:
+            return
+        
+        font = painter.font()
+        font_size = max(8, min(rect_w, rect_h) // 6)
+        font.setPointSize(font_size)
+        painter.setFont(font)
+
+        text_rect = QRect(
+            int(x1),
+            max(0, int(y1) - font_size - 4),
+            max(1, rect_w),
+            max(font_size + 8, 20),
+        )
+
+        painter.setPen(Qt.GlobalColor.white)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, face_id)
+
+        return
 
     def cargar_portafotos(self):
         path, _ = QFileDialog.getOpenFileName(

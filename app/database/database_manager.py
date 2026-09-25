@@ -134,11 +134,11 @@ class DBManager:
     # --------------------------------------------------------
     # EXTRAER TODOS LOS EMBEDDINGS PARA CLUSTERING
     # --------------------------------------------------------
-    def get_all_embeddings(self):
+    def get_all_embeddings(self) -> List[Tuple[int, List[float], str]]:
         """
         Devuelve una lista de tuplas:
         [
-            (detection_id, embedding_vector),
+            (detection_id, embedding_vector, identity_id),
             ...
         ]
 
@@ -150,11 +150,11 @@ class DBManager:
         detections = self.session.query(FaceDetection).all()
 
         embeddings = [
-            (det.id, det.embedding)
+            (det.id, det.embedding, det.identity_id)
             for det in detections
         ]
 
-        return embeddings
+        return embeddings # type: ignore
 
 
     # --------------------------------------------------------
@@ -227,7 +227,7 @@ class DBManager:
             for det in entry.detections
         ]
 
-    def get_bboxes(self, path: str) -> List[List[float]]:
+    def get_dets(self, path: str) -> List[Tuple[List[float], str]]:
         """
         Return the bounding boxes of an entry given its path
         """
@@ -239,7 +239,7 @@ class DBManager:
         if entry is None:
             raise ValueError("Entry no existe")
 
-        return [det.bbox for det in entry.detections]
+        return [(det.bbox, det.identity_id) for det in entry.detections]
 
     def get_det_from_id(self, detection_id: int) -> Tuple[str, List[float]]:
         """
