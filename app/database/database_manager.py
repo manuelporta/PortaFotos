@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple
 from sqlalchemy import Column, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database.database_definitions import Base, Entry, FaceDetection, Identity
+from app.database.database_definitions import Base, Entry, FaceDetection, Identity, SceneType
 
 class DBManager:
     def __init__(self, db_path: Path | None = None):
@@ -62,11 +62,11 @@ class DBManager:
     # --------------------------------------------------------
     # AÑADIR ENTRADA (IMAGEN)
     # --------------------------------------------------------
-    def add_entry(self, path, date, camera_model, orientation, scene_type):
+    def add_entry(self, path, date, camera_model, orientation):
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
-        entry = Entry(path=path, date=date, camera_model=camera_model, orientation=orientation, scene_type=scene_type)
+        entry = Entry(path=path, date=date, camera_model=camera_model, orientation=orientation)
         self.session.add(entry)
         self.session.commit()
         return entry.id
@@ -104,6 +104,52 @@ class DBManager:
         self.session.commit()
 
 
+    # --------------------------------------------------------
+    # AÑADIR ESCENAS
+    # --------------------------------------------------------
+
+    def add_scene_types(self, entry_id, scene_list):
+        """
+        scene_list: lista de tuplas (type, score)
+                    ej: [("portrait", 0.23), ("selfie", 0.20)]
+        """
+
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(id=entry_id).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        for type_name, score in scene_list:
+            st = SceneType(entry_id=entry_id, type=type_name, score=score)
+            self.session.add(st)
+
+        self.session.commit()
+
+    def update_scene_types(self, path: str, new_scene_list: List[Tuple[str, float]]):
+        """
+        Actualiza la lista de tipos de escena para una entrada dada por su path.
+        new_scene_list: lista de tuplas (type, score)
+                        ej: [("portrait", 0.23), ("selfie", 0.20)]
+        """
+
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        # Eliminar los tipos de escena existentes
+        self.session.query(SceneType).filter_by(entry_id=entry.id).delete()
+
+        # Añadir los nuevos tipos de escena
+        for type_name, score in new_scene_list:
+            st = SceneType(entry_id=entry.id, type=type_name, score=score)
+            self.session.add(st)
+
+        self.session.commit()
 
     # --------------------------------------------------------
     # ASIGNAR IDENTIDAD A UNA DETECCIÓN
@@ -199,9 +245,21 @@ class DBManager:
         return {
             "date": str(entry.date),
             "camera_model": str(entry.camera_model),
-            "scene_type": entry.scene_type if isinstance(entry.scene_type, list) else str(entry.scene_type),
             "orientation": str(entry.orientation)
         }
+
+    def get_scene_types(self, path: str) -> List[Tuple[str, float]]:
+        """
+        Return the scene types of an entry given its path
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        return [(st.type, st.score) for st in entry.scene_types]
 
     def get_face_detections_by_path(self, path: str):
         """

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QPushButton,
     QFormLayout,
+    QVBoxLayout,
     QProgressBar,
     QMessageBox,
     QInputDialog,
@@ -29,6 +30,7 @@ from app.backend.gallery_processor import GalleryProcessor
 from app.frontend.person_identification_window import PersonIdentificationWindow
 
 from app.common.lookup import ORIENTATION_LUT
+from app.frontend.scene_edit_window import SceneEditWindow
 
 
 class MainWindow(QMainWindow):
@@ -173,11 +175,11 @@ class MainWindow(QMainWindow):
 
         rotate_left_btn = QPushButton("Rotar L", img_container)
         rotate_left_btn.clicked.connect(self.rotate_left)
-        rotate_right_btn = QPushButton("Rotar R", img_container)
-        rotate_right_btn.clicked.connect(self.rotate_right)
+        edit_dets_btn = QPushButton("Rotar R", img_container)
+        edit_dets_btn.clicked.connect(self.rotate_right)
 
         btn_layout.addWidget(rotate_left_btn)
-        btn_layout.addWidget(rotate_right_btn)
+        btn_layout.addWidget(edit_dets_btn)
         btn_row.setLayout(btn_layout)
 
         img_v.addWidget(btn_row, 0, Qt.AlignmentFlag.AlignCenter)
@@ -187,6 +189,7 @@ class MainWindow(QMainWindow):
 
         # Right: properties (20%)
         self.right_props = QWidget(self.main_widget)
+        props_layout = QVBoxLayout()
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         self.prop_filename = QLabel("--")
@@ -209,10 +212,24 @@ class MainWindow(QMainWindow):
                 if widget:
                     widget.setStyleSheet("font-weight: bold;")
 
-        self.right_props.setLayout(form)
+        props_layout.addLayout(form)
+
+        self.edit_scene_btn = QPushButton("Editar escena", self.right_props)
+        self.edit_scene_btn.setEnabled(self.current_path is not None)
+        self.edit_scene_btn.clicked.connect(self.edit_scene)
+        self.edit_dets_btn = QPushButton("Editar detecciones", self.right_props)
+        self.edit_dets_btn.setEnabled(self.current_path is not None)
+        self.edit_dets_btn.clicked.connect(self.edit_detections)
+
+        props_layout.addWidget(self.edit_scene_btn)
+        props_layout.addWidget(self.edit_dets_btn)
+        self.right_props.setLayout(props_layout)
+
         h.addWidget(self.right_props, 1)
 
         self.main_layout.addLayout(h)
+
+        pass
 
     def populate_list_from_db(self) -> None:
         """Puebla `self.img_list` con entradas de la base de datos (usa entry.path)."""
@@ -260,10 +277,13 @@ class MainWindow(QMainWindow):
 
         return super().keyPressEvent(a0)
     
-    def on_img_selected(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
+    def on_img_selected(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
         """ Carga la imagen seleccionada en la interfaz"""
 
+
         # Comprobar path seleccionado
+        if current is None:
+            return
         path = current.data(Qt.ItemDataRole.UserRole)
         if not path:
             return
@@ -273,6 +293,8 @@ class MainWindow(QMainWindow):
             return
 
         self.current_path = path
+        self.edit_scene_btn.setEnabled(True)
+        self.edit_dets_btn.setEnabled(True)
 
         # Cargar imagen y mostrar en el panel central
         img_properties = self.display_img(path)
@@ -329,13 +351,19 @@ class MainWindow(QMainWindow):
             self.prop_camera.setText(img_properties.get('camera_model', 'Unknown'))
         if hasattr(self, "prop_orientation"):
             self.prop_orientation.setText(img_properties.get('orientation', 'Unknown'))
-        if hasattr(self, "prop_scene"):
-            scene_value = img_properties.get('scene_type', 'Unknown')
-            if isinstance(scene_value, (list, tuple)):
-                text = "<br>".join(str(item) for item in scene_value)
-            else:
-                text = str(scene_value)
-            self.prop_scene.setText(text)
+        if hasattr(self, "prop_scene") and self.database is not None:
+            scene_values = self.database.get_scene_types(str(path))
+            if scene_values:
+                text = ""
+                conf_th = scene_values[0][1] - 0.02
+                for scene_name, confidence in scene_values:
+                    if confidence < conf_th:
+                        break
+                    text += str(scene_name) + "<br>"
+                    if scene_name == "default":
+                        break
+
+                self.prop_scene.setText(text)
 
     def rotate_left(self):
         """Rotate the current pixmap 90 degrees counter-clockwise and update display."""
@@ -435,6 +463,19 @@ class MainWindow(QMainWindow):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, face_id)
 
         return
+
+    def edit_scene(self):
+        """ Open the scene edit window for the currently selected image."""
+        if self.database is None or self.current_path is None:
+            self.log_status("No hay ninguna imagen cargada")
+            return
+        self.log_status("Abriendo ventana de edición de escenas")
+        window = SceneEditWindow(self.database, str(self.current_path), self)
+        window.exec()
+
+    def edit_detections(self):
+        # TODO: Implement the edit detections functionality
+        pass
 
     def cargar_portafotos(self):
         path, _ = QFileDialog.getOpenFileName(

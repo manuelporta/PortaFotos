@@ -19,9 +19,14 @@ class Entry(Base):
     date = Column(DateTime, default=datetime.now)
     orientation = Column(String, default='Unknown')
     camera_model = Column(String, default='Unknown')
-    scene_type = Column(JSON, default=list, nullable=True)  # lista ordenada de cadenas
-
-    detections = relationship("FaceDetection", cascade="all, delete-orphan")
+    scene_types = relationship("SceneType",
+            cascade="all, delete-orphan",
+            back_populates="entry"
+        )
+    detections = relationship("FaceDetection",
+            cascade="all, delete-orphan",
+            back_populates="entry"
+        )
 
 
 class Identity(Base):
@@ -57,3 +62,14 @@ class FaceDetection(Base):
 
     entry = relationship("Entry", back_populates="detections")
     identity = relationship("Identity", back_populates="detections")
+
+class SceneType(Base):
+    __tablename__ = "scene_types"
+
+    id = Column(Integer, primary_key=True)
+    entry_id = Column(Integer, ForeignKey("entries.id"), nullable=False)
+
+    type = Column(String, nullable=False)   # "portrait", "selfie", etc.
+    score = Column(Float, nullable=False)   # 0.23, 0.20, etc.
+
+    entry = relationship("Entry", back_populates="scene_types")

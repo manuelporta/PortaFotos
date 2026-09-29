@@ -70,8 +70,10 @@ class GalleryManager:
             date, camera_model, orientation = self.extract_metadata(file)
             if orientation in globals.PIL_ORIENTATION_LUT:
                 img = img.transpose(globals.PIL_ORIENTATION_LUT[orientation])
-            scene_type = self.infer_scene(img)
-            entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, orientation, scene_type)
+            entry_id = self.db.add_entry(str(file.resolve()), date, camera_model, orientation)
+            
+            scene_types = self.infer_scene(img)
+            self.db.add_scene_types(entry_id, scene_types)
 
             # Detectar rostros y extraer embeddings
             bboxes, face_embeddings, confidences = self.detect_faces(img)
@@ -168,15 +170,17 @@ class GalleryManager:
         # Resultado
 
         sorted_idx = similarity.argsort(descending=True).cpu().numpy()
-        conf_th = similarity[sorted_idx[0]].item() - 0.02
         output = []
+        seen_keywords = set()
         for idx in sorted_idx:
             confidence = similarity[idx].item()
-            if confidence < conf_th:
-                break
             scene = self.clip_scenes[idx]
             keyword = globals.CLIP_SCENES[scene]
-            output.append(f"{keyword}:{confidence:.2f}")
+            if keyword in seen_keywords:
+                continue
+            output.append((keyword, confidence))
+            seen_keywords.add(keyword)
+        
         return output
 
     def detect_faces(self, img: Image.Image):
