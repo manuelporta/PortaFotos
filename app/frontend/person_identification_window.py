@@ -82,7 +82,7 @@ class PersonIdentificationWindow(QDialog):
 
     def _load_detections(self):
 
-        keep_labels = self._ask_keep_labels()
+        
 
         msg_label = QLabel("Cargando clusters de imágenes...")
         self.image_grid.addWidget(msg_label, 0, 0)
@@ -96,6 +96,11 @@ class PersonIdentificationWindow(QDialog):
 
         detection_ids = []
         embeddings = []
+
+        if any([det[2] is not None for det in detections]):
+            keep_labels = self._ask_keep_labels()
+        else:
+            keep_labels = False
 
         for detection_id, embedding, identity_id in detections:
             if embedding is None:
@@ -221,7 +226,7 @@ class PersonIdentificationWindow(QDialog):
         card_layout.setContentsMargins(8, 8, 8, 8)
 
         # load img
-        file_path, bbox = self.database.get_det_from_id(det_id)
+        file_path, bbox = self.database.get_bbox_from_id(det_id)
         pixmap = QPixmap(str(file_path))
         if pixmap.isNull():
             pixmap = QPixmap(180, 140)
@@ -315,7 +320,10 @@ class PersonIdentificationWindow(QDialog):
             return
 
         for det_id in self.selected_faces:
-            self.database.assign_identity(det_id, label)
+            try:
+                self.database.assign_identity(det_id, label)
+            except ValueError as e:
+                QMessageBox.warning(self, "Error al renombrar", str(e))
 
         self.go_next()
 

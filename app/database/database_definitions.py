@@ -30,6 +30,7 @@ class Entry(Base):
 
 
 class Identity(Base):
+    """ Not used yet """
     __tablename__ = "identities"
 
     id = Column(Integer, primary_key=True)

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 from sqlalchemy import Column, create_engine
 from sqlalchemy.orm import sessionmaker
@@ -60,7 +60,7 @@ class DBManager:
         self.close()
 
     # --------------------------------------------------------
-    # AÑADIR ENTRADA (IMAGEN)
+    # ENTRADAS
     # --------------------------------------------------------
     def add_entry(self, path, date, camera_model, orientation):
         if not self.session:
@@ -71,8 +71,40 @@ class DBManager:
         self.session.commit()
         return entry.id
 
+    def get_all_paths(self) -> List[str]:
+        """
+        Return all image paths in database
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        return [str(entry.path) for entry in self.session.query(Entry).all()]
+
+
+    def get_all_embeddings(self) -> List[Tuple[int, List[float], str]]:
+        """
+        Devuelve una lista de tuplas:
+        [
+            (detection_id, embedding_vector, identity_id),
+            ...
+        ]
+
+        donde embedding_vector es la lista completa almacenada en JSON.
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        detections = self.session.query(FaceDetection).all()
+
+        embeddings = [
+            (det.id, det.embedding, det.identity_id)
+            for det in detections
+        ]
+
+        return embeddings # type: ignore
+
     # --------------------------------------------------------
-    # AÑADIR DETECCIONES FACIALES
+    # DETECCIONES FACIALES
     # --------------------------------------------------------
     def add_face_detections(self, entry_id, embeddings_list, bboxes, confidences):
         """
@@ -103,9 +135,123 @@ class DBManager:
 
         self.session.commit()
 
+    def add_manual_detection(self, path: str, bbox: List[float]) -> int:
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        existing_indices = [det.index for det in entry.detections if det.index is not None]
+        detection = FaceDetection(
+            entry_id=entry.id,
+            index=max(existing_indices, default=-1) + 1,
+            embedding=None,
+            bbox=bbox,
+            confidence=None,
+        )
+        self.session.add(detection)
+        self.session.commit()
+        return cast(int, detection.id)
+
+    def update_detection_bbox(self, detection_id: int, bbox: List[float]):
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        detection = self.session.query(FaceDetection).filter_by(id=detection_id).first()
+        if detection is None:
+            raise ValueError("Detección no existe")
+
+        setattr(detection, "bbox", bbox)
+        self.session.commit()
+
+    def get_full_detections_by_path(self, path: str):
+        """
+        Return the face detections associated with an entry given its path.
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        return [
+            {
+                "id": det.id,
+                "index": det.index,
+                "bbox": det.bbox,
+                "confidence": det.confidence,
+                "identity_id": det.identity_id,
+                "embedding": det.embedding,
+            }
+            for det in entry.detections
+        ]
+
+    def get_simple_dets_by_path(self, path: str) -> List[Tuple[List[float], str]]:
+        """
+        Return the bounding boxes of an entry given its path
+        """
+
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        return [(det.bbox, det.identity_id) for det in entry.detections]
+
+    def get_bbox_from_id(self, detection_id: int) -> Tuple[str, List[float]]:
+        """
+        Return the file path and bounding box of a detection given its ID
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        det = self.session.query(FaceDetection).filter_by(id=detection_id).first()
+        if det is None:
+            raise ValueError("Detección no existe")
+
+        entry = self.session.query(Entry).filter_by(id=det.entry_id).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
+
+        if isinstance(det.bbox, list):
+            return str(entry.path), det.bbox
+        else:
+            raise ValueError("Bounding box no es una lista válida")
+
+    def remove_detection(self, detection_id: int):
+        """
+        Remove a detection given its ID
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        det = self.session.query(FaceDetection).filter_by(id=detection_id).first()
+        if det is None:
+            raise ValueError(f"La detección {detection_id} no existe en la base de datos")
+
+        self.session.delete(det)
+        self.session.commit()
+    # --------------------------------------------------------
+    # IDENTIDADES
+    # --------------------------------------------------------
+    def assign_identity(self, detection_id, identity_id):
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        det = self.session.query(FaceDetection).filter_by(id=detection_id).first()
+        if det is None:
+            raise ValueError("Detección no existe")
+
+        det.identity_id = identity_id
+        self.session.commit()
 
     # --------------------------------------------------------
-    # AÑADIR ESCENAS
+    # ESCENAS
     # --------------------------------------------------------
 
     def add_scene_types(self, entry_id, scene_list):
@@ -151,86 +297,22 @@ class DBManager:
 
         self.session.commit()
 
-    # --------------------------------------------------------
-    # ASIGNAR IDENTIDAD A UNA DETECCIÓN
-    # --------------------------------------------------------
-    def assign_identity(self, detection_id, identity_id):
-        if not self.session:
-            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
-
-        det = self.session.query(FaceDetection).filter_by(id=detection_id).first()
-        if det is None:
-            raise ValueError("Detección no existe")
-
-        det.identity_id = identity_id
-        self.session.commit()
-
-    # --------------------------------------------------------
-    # CREAR IDENTIDAD GLOBAL
-    # --------------------------------------------------------
-    def create_identity(self, name, cluster_id, mean_embedding, notes=None):
-        if not self.session:
-            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
-        
-        ident = Identity(name=name, cluster_id=cluster_id, mean_embedding=mean_embedding, notes=notes)
-        self.session.add(ident)
-        self.session.commit()
-        return ident.id
-
-    # --------------------------------------------------------
-    # EXTRAER TODOS LOS EMBEDDINGS PARA CLUSTERING
-    # --------------------------------------------------------
-    def get_all_embeddings(self) -> List[Tuple[int, List[float], str]]:
+    def get_scene_types(self, path: str) -> List[Tuple[str, float]]:
         """
-        Devuelve una lista de tuplas:
-        [
-            (detection_id, embedding_vector, identity_id),
-            ...
-        ]
-
-        donde embedding_vector es la lista completa almacenada en JSON.
+        Return the scene types of an entry given its path
         """
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
-        detections = self.session.query(FaceDetection).all()
+        entry = self.session.query(Entry).filter_by(path=path).first()
+        if entry is None:
+            raise ValueError("Entry no existe")
 
-        embeddings = [
-            (det.id, det.embedding, det.identity_id)
-            for det in detections
-        ]
-
-        return embeddings # type: ignore
-
+        return [(st.type, st.score) for st in entry.scene_types]
 
     # --------------------------------------------------------
-    # BUSCAR ENTRADAS
+    # PROPIEDADES
     # --------------------------------------------------------
-    def search_entries(self, **filters):
-        # TODO not used yet, but can be used to filter by date, camera_model, scene_type, etc.
-
-        if not self.session:
-            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
-
-        query = self.session.query(Entry)
-
-        if "scene_type" in filters:
-            query = query.filter(Entry.scene_type == filters["scene_type"])
-
-        if "date" in filters:
-            query = query.filter(Entry.date == filters["date"])
-
-        return query.all()
-
-    def get_all_paths(self) -> List[str]:
-        """
-        Return all image paths in database
-        """
-        if not self.session:
-            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
-
-        return [str(entry.path) for entry in self.session.query(Entry).all()]
-
     def get_entry_properties(self, path: str) -> Dict[str, Any]:
         """
         Return the properties of an entry given its path
@@ -248,75 +330,33 @@ class DBManager:
             "orientation": str(entry.orientation)
         }
 
-    def get_scene_types(self, path: str) -> List[Tuple[str, float]]:
-        """
-        Return the scene types of an entry given its path
-        """
+    # --------------------------------------------------------
+    # NOT USED YET
+    # --------------------------------------------------------
+    def create_identity(self, name, cluster_id, mean_embedding, notes=None):
+        """ Not used yet """
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+        
+        ident = Identity(name=name, cluster_id=cluster_id, mean_embedding=mean_embedding, notes=notes)
+        self.session.add(ident)
+        self.session.commit()
+        return ident.id
 
-        entry = self.session.query(Entry).filter_by(path=path).first()
-        if entry is None:
-            raise ValueError("Entry no existe")
-
-        return [(st.type, st.score) for st in entry.scene_types]
-
-    def get_face_detections_by_path(self, path: str):
-        """
-        Return the face detections associated with an entry given its path.
-        TODO: not used yet
-        """
-        if not self.session:
-            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
-
-        entry = self.session.query(Entry).filter_by(path=path).first()
-        if entry is None:
-            raise ValueError("Entry no existe")
-
-        return [
-            {
-                "id": det.id,
-                "index": det.index,
-                "bbox": det.bbox,
-                "confidence": det.confidence,
-                "identity_id": det.identity_id,
-                "embedding": det.embedding,
-            }
-            for det in entry.detections
-        ]
-
-    def get_dets(self, path: str) -> List[Tuple[List[float], str]]:
-        """
-        Return the bounding boxes of an entry given its path
-        """
+    def search_entries(self, **filters):
+        # TODO not used yet, but can be used to filter by date, camera_model, scene_type, etc.
 
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
-        entry = self.session.query(Entry).filter_by(path=path).first()
-        if entry is None:
-            raise ValueError("Entry no existe")
+        query = self.session.query(Entry)
 
-        return [(det.bbox, det.identity_id) for det in entry.detections]
+        if "scene_type" in filters:
+            query = query.filter(Entry.scene_type == filters["scene_type"])
 
-    def get_det_from_id(self, detection_id: int) -> Tuple[str, List[float]]:
-        """
-        Return the file path and bounding box of a detection given its ID
-        """
-        if not self.session:
-            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+        if "date" in filters:
+            query = query.filter(Entry.date == filters["date"])
 
-        det = self.session.query(FaceDetection).filter_by(id=detection_id).first()
-        if det is None:
-            raise ValueError("Detección no existe")
-
-        entry = self.session.query(Entry).filter_by(id=det.entry_id).first()
-        if entry is None:
-            raise ValueError("Entry no existe")
-
-        if isinstance(det.bbox, list):
-            return str(entry.path), det.bbox
-        else:
-            raise ValueError("Bounding box no es una lista válida")
+        return query.all()
 
 

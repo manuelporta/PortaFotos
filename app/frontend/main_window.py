@@ -27,6 +27,7 @@ from app.common.exceptions import UnknownError
 from app.database.database_manager import DBManager
 from app.backend.data_processing import GalleryManager
 from app.backend.gallery_processor import GalleryProcessor
+from app.frontend.detection_edit_window import DetectionEditWindow
 from app.frontend.person_identification_window import PersonIdentificationWindow
 
 from app.common.lookup import ORIENTATION_LUT
@@ -414,7 +415,7 @@ class MainWindow(QMainWindow):
         if not self.database:
             return pixmap
 
-        dets = self.database.get_dets(path)
+        dets = self.database.get_simple_dets_by_path(path)
         if not dets or len(dets) == 0:
             return pixmap
 
@@ -474,8 +475,12 @@ class MainWindow(QMainWindow):
         window.exec()
 
     def edit_detections(self):
-        # TODO: Implement the edit detections functionality
-        pass
+        if self.database is None or self.current_path is None:
+            self.log_status("No hay ninguna imagen cargada")
+            return
+        self.log_status("Abriendo ventana de edición de detecciones")
+        window = DetectionEditWindow(self.database, str(self.current_path), self)
+        window.exec()
 
     def cargar_portafotos(self):
         path, _ = QFileDialog.getOpenFileName(

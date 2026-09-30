@@ -1,31 +1,19 @@
-from pathlib import Path
-
-import hdbscan
-import numpy as np
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap, QTransform
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QDialog,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
-    QWidget,
 )
 
 from app.database.database_manager import DBManager
-from app.common.lookup import ORIENTATION_LUT
 
 
-DISTANCE_THRESHOLD = 0.55
 
 
 class SceneEditWindow(QDialog):
