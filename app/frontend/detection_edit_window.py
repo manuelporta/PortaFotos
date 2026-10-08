@@ -1,3 +1,4 @@
+from difflib import get_close_matches
 from pathlib import Path
 
 from PyQt6.QtCore import QRectF, Qt, QTimer, pyqtSignal
@@ -9,6 +10,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -95,6 +97,80 @@ class DetectionCanvas(QGraphicsView):
         event.accept()
 
 
+class IdentityNameInputDialog(QDialog):
+    def __init__(self, parent=None, title: str = "Nombre", label: str = "Nombre:", default_text: str = "", existing_names=None):
+        super().__init__(parent)
+        self.existing_names = existing_names or []
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(420, 180)
+
+        layout = QVBoxLayout(self)
+
+        self.prompt_label = QLabel(label)
+        layout.addWidget(self.prompt_label)
+
+        self.line_edit = QLineEdit(default_text)
+        self.line_edit.textEdited.connect(self._update_suggestion_status)
+        layout.addWidget(self.line_edit)
+
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        buttons_row = QHBoxLayout()
+        buttons_row.addStretch()
+        self.cancel_button = QPushButton("Cancelar")
+        self.accept_button = QPushButton("Aceptar")
+        self.accept_button.setDefault(True)
+        self.cancel_button.clicked.connect(self.reject)
+        self.accept_button.clicked.connect(self.accept)
+        buttons_row.addWidget(self.cancel_button)
+        buttons_row.addWidget(self.accept_button)
+        layout.addLayout(buttons_row)
+
+        self._update_suggestion_status(default_text)
+
+    def _normalize_name(self, value: str) -> str:
+        return value.strip().casefold()
+
+    def _suggest_names(self, typed_text: str):
+        if not typed_text.strip():
+            return []
+
+        suggestions = get_close_matches(typed_text, self.existing_names, n=5, cutoff=0.4)
+
+        return suggestions
+
+    def _update_suggestion_status(self, text: str):
+        trimmed = text.strip()
+        if not trimmed:
+            self.status_label.setText("")
+            self.status_label.setStyleSheet("")
+            return
+
+        exact_match = any(self._normalize_name(name) == self._normalize_name(trimmed) for name in self.existing_names)
+        if exact_match:
+            self.status_label.setText("Este nombre ya existe en la base de datos.")
+            self.status_label.setStyleSheet("color: #b22222;")
+            return
+        
+        suggestions = self._suggest_names(trimmed)
+        if suggestions:
+            self.status_label.setText(f"Sugerencias parecidas: {', '.join(suggestions[:3])}")
+            self.status_label.setStyleSheet("color: #007acc;")
+        else:
+            self.status_label.setText("No se han encontrado nombres parecidos.")
+            self.status_label.setStyleSheet("color: #555555;")
+
+    @staticmethod
+    def get_identity_name(parent=None, title: str = "Nombre", label: str = "Nombre:", default_text: str = "", existing_names=None):
+        dialog = IdentityNameInputDialog(parent=parent, title=title, label=label, default_text=default_text, existing_names=existing_names)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return dialog.line_edit.text().strip(), True
+        return "", False
+
+
 class DetectionEditWindow(QDialog):
     def __init__(self, database: DBManager, path: str, parent=None):
         super().__init__(parent)
@@ -102,7 +178,7 @@ class DetectionEditWindow(QDialog):
         self.path = path
         self._editing_detection_id = None
 
-        self.setWindowTitle("Editar escenas")
+        self.setWindowTitle("Editar detecciones")
         self.resize(1100, 700)
         self.setModal(True)
 
@@ -195,7 +271,11 @@ class DetectionEditWindow(QDialog):
         self.info_label.setText("Modifica la detección como desees.")
         detection = self.detections[self.det_index]
         identity = detection.get("identity_id", "None")
-        self.name_label.setText(f"ID asignado: {identity }")
+        if identity:
+            identity_name = self.database.get_identity_name(identity)
+        else:
+            identity_name = "Sin asignar"
+        self.name_label.setText(f"ID asignado: {identity_name }")
 
         # crop image to bbox
         x, y, x2, y2 = [int(a) for a in detection['bbox']]
@@ -246,7 +326,15 @@ class DetectionEditWindow(QDialog):
             return
 
         det_id = self.detections[self.det_index]['id']
-        new_name, ok = QInputDialog.getText(self, "Renombrar detección", "Nuevo nombre:")
+        current_name = self.detections[self.det_index].get("identity_id")
+        existing_names = self.database.get_all_identities()
+        new_name, ok = IdentityNameInputDialog.get_identity_name(
+            self,
+            title="Renombrar detección",
+            label="Nuevo nombre:",
+            default_text=str(current_name) if current_name is not None else "",
+            existing_names=existing_names,
+        )
         if ok and new_name:
             try:
                 self.database.assign_identity(det_id, new_name)
@@ -295,12 +383,14 @@ class DetectionEditWindow(QDialog):
         self.image_canvas.set_drawing_enabled(False)
 
     def _ask_identity(self):
-        """Solicita al usuario el nombre de nueva detección."""
-        nombre, ok = QInputDialog.getText(
+        """Solicita al usuario el nombre de nueva detección con sugerencias parecidas."""
+        existing_names = self.database.get_all_identities()
+        nombre, ok = IdentityNameInputDialog.get_identity_name(
             self,
-            "Nombre de la nueva detección",
-            "",
-            text="JoseAntonio",
+            title="Nombre de la nueva detección",
+            label="Escribe el nombre del rostro:",
+            default_text="JoseAntonio",
+            existing_names=existing_names,
         )
 
         if not ok or not nombre.strip():

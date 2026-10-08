@@ -189,7 +189,7 @@ class DBManager:
             for det in entry.detections
         ]
 
-    def get_simple_dets_by_path(self, path: str) -> List[Tuple[List[float], str]]:
+    def get_simple_dets_by_path(self, path: str) -> List[Tuple[List[float], int]]:
         """
         Return the bounding boxes of an entry given its path
         """
@@ -200,6 +200,7 @@ class DBManager:
         entry = self.session.query(Entry).filter_by(path=path).first()
         if entry is None:
             raise ValueError("Entry no existe")
+        
 
         return [(det.bbox, det.identity_id) for det in entry.detections]
 
@@ -239,7 +240,7 @@ class DBManager:
     # --------------------------------------------------------
     # IDENTIDADES
     # --------------------------------------------------------
-    def assign_identity(self, detection_id, identity_id):
+    def assign_identity(self, detection_id: int, identity_name: str):
         if not self.session:
             raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
 
@@ -247,7 +248,56 @@ class DBManager:
         if det is None:
             raise ValueError("Detección no existe")
 
-        det.identity_id = identity_id
+        identity_name = str(identity_name).strip()
+        if not identity_name:
+            raise ValueError("El nombre de la identidad no puede estar vacío")
+        
+        identity = self.session.query(Identity).filter_by(name=identity_name).first()
+        if identity is None:
+            identity = Identity(name=identity_name)
+            self.session.add(identity)
+            self.session.flush()
+        
+        det.identity_id = identity.id
+
+        self.session.commit()
+        return 
+
+    def get_all_identities(self) -> List[str]:
+        """
+        Return all identities in database
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        return [str(identity.name) for identity in self.session.query(Identity).all()]
+
+    def get_identity_name(self, identity_id: int) -> str:
+        """
+        Return the name of an identity given its ID
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        identity = self.session.query(Identity).filter_by(id=identity_id).first()
+        if identity is None:
+            return ""
+
+        return str(identity.name)
+
+    def clear_all_identities(self):
+        """
+        Remove all identities and unassign them from detections
+        """
+        if not self.session:
+            raise ValueError("Sesión no inicializada. Llama a create_database() o load_database() primero.")
+
+        # Unassign identities from detections
+        self.session.query(FaceDetection).update({FaceDetection.identity_id: None})
+
+        # Delete all identities
+        self.session.query(Identity).delete()
+
         self.session.commit()
 
     # --------------------------------------------------------

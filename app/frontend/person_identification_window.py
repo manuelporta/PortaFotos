@@ -1,3 +1,4 @@
+from difflib import get_close_matches
 from pathlib import Path
 
 import hdbscan
@@ -72,17 +73,22 @@ class PersonIdentificationWindow(QDialog):
         form_layout.addWidget(QLabel("Etiqueta:"))
         self.name_input = QLineEdit(self)
         self.name_input.setPlaceholderText("Inserta el nombre o etiqueta de la persona")
+        self.name_input.textEdited.connect(self._update_name_suggestions)
         form_layout.addWidget(self.name_input)
+
+        self.name_suggestion_label = QLabel("")
+        self.name_suggestion_label.setWordWrap(True)
+        self.name_suggestion_label.setVisible(False)
+        main_layout.addWidget(self.name_suggestion_label)
 
         self.next_button = QPushButton("Siguiente", self)
         self.next_button.clicked.connect(self.on_next_clicked)
+        self.next_button.setDefault(True)
         form_layout.addWidget(self.next_button)
 
         main_layout.addLayout(form_layout)
 
     def _load_detections(self):
-
-        
 
         msg_label = QLabel("Cargando clusters de imágenes...")
         self.image_grid.addWidget(msg_label, 0, 0)
@@ -99,6 +105,8 @@ class PersonIdentificationWindow(QDialog):
 
         if any([det[2] is not None for det in detections]):
             keep_labels = self._ask_keep_labels()
+            if not keep_labels:
+                self.database.clear_all_identities()
         else:
             keep_labels = False
 
@@ -160,6 +168,33 @@ class PersonIdentificationWindow(QDialog):
         self.next_button.setEnabled(True)
         self.name_input.setEnabled(True)
 
+
+    def _update_name_suggestions(self, text: str):
+        trimmed = text.strip()
+        if not trimmed:
+            self.name_suggestion_label.setText("")
+            self.name_suggestion_label.setVisible(False)
+            return
+
+        existing_names = self.database.get_all_identities()
+        normalized = trimmed.casefold()
+
+        exact_match = any(str(name).strip().casefold() == normalized for name in existing_names)
+        if exact_match:
+            label_text = "Este nombre ya existe en la base de datos."
+            self.name_suggestion_label.setStyleSheet("color: #b22222;") # rojo oscuro
+        else:        
+            similar = get_close_matches(trimmed, existing_names, n=5, cutoff=0.4)
+
+            if similar:
+                label_text = f"Sugerencias parecidas: {', '.join(similar[:3])}"
+                self.name_suggestion_label.setStyleSheet("color: #007acc;") # azul cian
+            else:
+                label_text = "No hay nombres parecidos en la base de datos."
+                self.name_suggestion_label.setStyleSheet("color: #555555;") # gris oscuro
+
+        self.name_suggestion_label.setText(label_text)
+        self.name_suggestion_label.setVisible(True)
 
     def _ask_keep_labels(self):
         reply = QMessageBox.question(
@@ -330,5 +365,9 @@ class PersonIdentificationWindow(QDialog):
     def go_next(self):
         self.selected_faces.clear()
         self.name_input.clear()
+        self.name_suggestion_label.clear()
+        self.name_suggestion_label.setVisible(False)
         self.cluster_index += 1
         self._display_detections(self.cluster_index)
+        self.name_input.setFocus()
+        self.name_input.selectAll()

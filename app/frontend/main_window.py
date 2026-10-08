@@ -429,7 +429,8 @@ class MainWindow(QMainWindow):
         painter.setPen(bbox_pen)
 
         for bbox, face_id in dets:
-            self.draw_detection(painter, bbox_pen, bbox, face_id)
+            face_name = self.database.get_identity_name(face_id)
+            self.draw_detection(painter, bbox_pen, bbox, face_name)
 
         painter.end()
 
